@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.5.0**
+**Current version: 0.6.0**
 
 Synctify is a local-first macOS music library manager. Spotify provides desired playlist/library state, Synctify keeps one canonical local lossless library, generates UTF-8 M3U8 playlists, mirrors that library to devices, and can maintain a non-destructive cloud backup.
 
@@ -13,7 +13,9 @@ Desired playlist/library state
    ↓
 Track resolution
    ↓
-External downloader (qobuz-dl)
+External downloader
+   ├── qobuz-dl
+   └── streamrip
    ↓
 Canonical local library
    ↓
@@ -22,7 +24,7 @@ M3U8 playlists
    └── backup → pCloud
 ```
 
-Synctify uses Spotify for metadata and playlist state only. It does not download audio from Spotify.
+Synctify uses Spotify for metadata and playlist state only. It does not download audio from Spotify. Downloaders remain external tools and can be swapped without changing Synctify's local library or playlist model.
 
 ## Current state
 
@@ -37,13 +39,14 @@ Synctify currently includes:
 - deterministic provider-neutral track resolution
 - exact ISRC matching before metadata matching
 - ambiguity protection and persistent manual overrides
-- external qobuz-dl acquisition
+- external qobuz-dl and streamrip acquisition adapters
 - downloaded FLAC path and SHA-256 persistence
-- UTF-8 M3U8 generation with relative paths
+- database-backed UTF-8 M3U8 playlist generation
+- strict and opt-in partial playlist handling
 - explicit mirror vs backup sync policy
 - macOS GitHub Actions tests
 
-Playlist generation from imported Spotify state, device transport, pCloud snapshots, and garbage collection remain future stages.
+Device transport, pCloud snapshots, and garbage collection remain future stages.
 
 ## Spotify setup
 
@@ -81,7 +84,7 @@ synctify update --dry-run
 synctify update
 ```
 
-`update` refreshes desired Spotify state. Acquisition is intentionally a separate explicit step.
+`update` refreshes desired Spotify state. Acquisition remains a separate explicit step.
 
 ## Track resolution
 
@@ -112,9 +115,11 @@ Remove it:
 synctify resolve clear SPOTIFY_TRACK_ID
 ```
 
-## qobuz-dl external dependency
+## External downloaders
 
-Synctify uses [Sei969/qobuz-dl](https://github.com/Sei969/qobuz-dl) for Qobuz downloads. Synctify does not vendor, copy, or reimplement qobuz-dl internals.
+Synctify can use either [Sei969/qobuz-dl](https://github.com/Sei969/qobuz-dl) or [nathom/streamrip](https://github.com/nathom/streamrip) for Qobuz downloads. Synctify does not vendor or copy either project.
+
+### qobuz-dl
 
 A separate clone is required:
 
@@ -122,59 +127,89 @@ A separate clone is required:
 git clone https://github.com/Sei969/qobuz-dl.git
 ```
 
-Complete qobuz-dl's upstream setup inside that clone, including Qobuz authentication. The resulting `qobuz-dl` executable must either be on `PATH` or be supplied to Synctify.
+Complete qobuz-dl's upstream setup inside that clone, including Qobuz authentication. The resulting `qobuz-dl` executable must be on `PATH`, supplied with `--qobuz-dl`, or configured with `SYNCTIFY_QOBUZ_DL`.
 
-Check it from Synctify:
+Check it:
 
 ```bash
 synctify qobuz doctor
-```
-
-If the executable is inside the clone's virtual environment, either pass it directly:
-
-```bash
 synctify qobuz doctor --executable /path/to/qobuz-dl/.venv/bin/qobuz-dl
 ```
 
-or set:
+### streamrip
+
+Streamrip is optional and can be installed separately using its upstream instructions. On macOS it supports Homebrew:
 
 ```bash
-export SYNCTIFY_QOBUZ_DL=/path/to/qobuz-dl/.venv/bin/qobuz-dl
+brew install streamrip
 ```
 
-qobuz-dl supports macOS. Its current upstream project is Python-based and includes macOS Keychain handling.
+It can also be installed from its repository or Python package. Synctify expects the `rip` executable on `PATH`, through `--streamrip`, or through `SYNCTIFY_STREAMRIP`.
 
-Synctify treats qobuz-dl as an external executable. This also keeps qobuz-dl's GPL-3.0 code outside the Synctify codebase.
+Check it:
+
+```bash
+synctify streamrip doctor
+```
+
+Both integrations remain out-of-process. A track resolved to Qobuz is still stored as a Qobuz resolution regardless of which downloader transfers the FLAC.
 
 ## Acquisition
 
-Once a Spotify track has a Qobuz resolution, inspect pending downloads:
+Inspect pending resolved downloads:
 
 ```bash
 synctify acquire --dry-run
 ```
 
-Download them through the external qobuz-dl clone:
+qobuz-dl remains the default:
 
 ```bash
 synctify acquire
+synctify acquire --downloader qobuz-dl
+```
+
+Use Streamrip instead:
+
+```bash
+synctify acquire --downloader streamrip
 ```
 
 Useful options:
 
 ```bash
 synctify acquire --limit 10
-synctify acquire --quality 27
+synctify acquire --downloader qobuz-dl --quality 27
+synctify acquire --downloader streamrip --quality 4
 synctify acquire --qobuz-dl /path/to/qobuz-dl/.venv/bin/qobuz-dl
+synctify acquire --downloader streamrip --streamrip /opt/homebrew/bin/rip
 ```
 
-For Synctify-managed acquisitions, qobuz-dl's own downloaded-ID database is bypassed. Synctify records the resulting FLAC path, Qobuz track ID, SHA-256 hash, and local status in its SQLite state database.
+For Synctify-managed acquisitions, each downloader's downloaded-ID database is bypassed where supported. Synctify records the resulting FLAC path, Qobuz track ID, SHA-256 hash, and local status in its own SQLite state database.
 
 A direct qobuz-dl passthrough remains available for diagnostics:
 
 ```bash
 synctify qobuz download-url https://open.qobuz.com/track/123456789 -d /tmp/qobuz-test
 ```
+
+## Playlist generation
+
+Build M3U8 files directly from imported Spotify playlist order and acquired local paths:
+
+```bash
+synctify playlists build
+```
+
+The default is strict. If any track in a playlist has not been acquired, Synctify reports the missing tracks and does not write that playlist. This avoids silently producing a playlist that looks complete but is not.
+
+To intentionally create partial playlists from the files currently available:
+
+```bash
+synctify playlists build --allow-partial
+```
+
+M3U8 entries use relative UTF-8 paths into the canonical library. Duplicate Spotify playlist names receive distinct filenames so they do not overwrite each other.
 
 ## Sync semantics
 
@@ -219,14 +254,16 @@ synctify resolve set <spotify-id> <provider> <provider-track-id>
 synctify resolve clear <spotify-id>
 synctify qobuz doctor
 synctify qobuz download-url <url> -d <destination>
+synctify streamrip doctor
 synctify acquire
 synctify acquire --dry-run
+synctify playlists build
+synctify playlists build --allow-partial
 ```
 
 Planned:
 
 ```text
-synctify playlists build
 synctify sync <target>
 synctify backup <target>
 synctify clean --dry-run
