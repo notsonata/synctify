@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.15.0**
+**Current version: 0.16.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -31,6 +31,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 
 - Python 3.12+ CLI
 - SQLite state database with migrations
+- top-level read-only setup diagnostics through `synctify doctor`
 - Spotify PKCE authentication with refresh tokens in the system keychain
 - Liked Songs and owned/collaborative playlist ingestion
 - deterministic source matching with ambiguity protection
@@ -59,6 +60,36 @@ synctify init
 ```
 
 Set `SYNCTIFY_HOME` to override the default application-data directory.
+
+## Diagnostics
+
+Run a read-only health check of the local setup:
+
+```bash
+synctify doctor
+```
+
+The doctor checks:
+
+- Synctify home, library, and playlist directories
+- SQLite integrity, schema version, and required core tables
+- Spotify configuration and whether a refresh-capable token exists in the system keychain
+- qobuz-dl, Streamrip, and rclone executable availability
+- locally configured rclone remote names through `rclone listremotes`
+- mounted-filesystem mirror destinations
+- configured rclone backup destinations
+
+It does not create directories, initialize or migrate SQLite, refresh Spotify tokens, contact Spotify/Qobuz/Tidal/Deezer/SoundCloud, download audio, or alter target state.
+
+Checks are classified as `PASS`, `WARN`, or `FAIL`. Missing optional tools, an uninitialized setup, an unplugged mirror target, and an unconfigured backup remote are warnings. Database corruption, invalid schema state, unsafe mirror overlap, and malformed configured targets are failures. `synctify doctor` exits with code 2 only when failures are present.
+
+Executable paths can be inspected explicitly:
+
+```bash
+synctify doctor --qobuz-dl /path/to/qobuz-dl
+synctify doctor --streamrip /opt/homebrew/bin/rip
+synctify doctor --rclone /opt/homebrew/bin/rclone
+```
 
 ## Spotify setup
 
@@ -255,7 +286,7 @@ synctify playlists build --allow-partial
 
 Strict mode skips an incomplete playlist. Partial mode writes only currently available tracks.
 
-Generated M3U8 files now have explicit ownership state in SQLite schema v5 and include a marker immediately after `#EXTM3U`:
+Generated M3U8 files have explicit ownership state in SQLite schema v5 and include a marker immediately after `#EXTM3U`:
 
 ```text
 #EXTM3U
@@ -268,7 +299,7 @@ Ownership lets Synctify safely maintain the generated playlist directory:
 - if a Spotify playlist is removed, its owned generated M3U8 is removed on the next playlist build/update
 - if a playlist is renamed or its duplicate-name disambiguation changes, the previous owned filename is removed after the replacement is written
 - unknown `.m3u8` files are never deleted merely because their names resemble a Spotify playlist
-- if the normal generated filename is occupied by an unmarked user file, Synctify preserves it and chooses a deterministic `[synctify-…]` filename instead
+- if the normal generated filename is occupied by an unmarked user file, Synctify preserves it and chooses a deterministic `[synctify-...]` filename instead
 - if a file recorded as owned no longer carries the matching ownership marker, Synctify treats it as protected and relinquishes ownership rather than deleting it
 - existing pre-v0.15 Synctify outputs are adopted only when their full legacy content exactly matches the playlist Synctify is about to render
 
