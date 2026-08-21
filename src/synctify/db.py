@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+SCHEMA_VERSION = "3"
+
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
@@ -136,5 +138,6 @@ def initialize(path: Path) -> None:
         connection.executescript(SCHEMA)
         _migrate(connection)
         connection.execute(
-            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', '3')"
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', ?)",
+            (SCHEMA_VERSION,),
         )
