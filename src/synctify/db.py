@@ -45,6 +45,24 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track_id
 ON playlist_tracks(track_id);
 
+CREATE TABLE IF NOT EXISTS track_resolutions (
+    spotify_id TEXT PRIMARY KEY REFERENCES tracks(spotify_id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    provider_track_id TEXT NOT NULL,
+    match_method TEXT NOT NULL CHECK (match_method IN ('manual', 'isrc', 'metadata')),
+    confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+    is_manual INTEGER NOT NULL DEFAULT 0,
+    candidate_isrc TEXT,
+    candidate_title TEXT,
+    candidate_artist TEXT,
+    candidate_album TEXT,
+    candidate_duration_ms INTEGER,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_track_resolutions_provider
+ON track_resolutions(provider, provider_track_id);
+
 CREATE TABLE IF NOT EXISTS sync_targets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -91,11 +109,32 @@ def _migrate(connection: sqlite3.Connection) -> None:
             "ALTER TABLE playlists ADD COLUMN collaborative INTEGER NOT NULL DEFAULT 0"
         )
 
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS track_resolutions (
+            spotify_id TEXT PRIMARY KEY REFERENCES tracks(spotify_id) ON DELETE CASCADE,
+            provider TEXT NOT NULL,
+            provider_track_id TEXT NOT NULL,
+            match_method TEXT NOT NULL CHECK (match_method IN ('manual', 'isrc', 'metadata')),
+            confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+            is_manual INTEGER NOT NULL DEFAULT 0,
+            candidate_isrc TEXT,
+            candidate_title TEXT,
+            candidate_artist TEXT,
+            candidate_album TEXT,
+            candidate_duration_ms INTEGER,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_track_resolutions_provider
+        ON track_resolutions(provider, provider_track_id);
+        """
+    )
+
 
 def initialize(path: Path) -> None:
     with connect(path) as connection:
         connection.executescript(SCHEMA)
         _migrate(connection)
         connection.execute(
-            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', '2')"
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', '3')"
         )
