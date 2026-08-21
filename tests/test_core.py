@@ -33,6 +33,7 @@ def test_initialize_creates_schema(tmp_path: Path) -> None:
         "track_resolutions",
         "sync_targets",
         "sync_runs",
+        "playlist_backup_snapshots",
     } <= tables
     assert schema_version == SCHEMA_VERSION
 
@@ -121,4 +122,5 @@ def test_initialize_migrates_v1_playlist_schema(tmp_path: Path) -> None:
         ).fetchone()[0]
     assert {"source_kind", "owner_id", "collaborative"} <= columns
     assert "track_resolutions" in tables
+    assert "playlist_backup_snapshots" in tables
     assert version == SCHEMA_VERSION
