@@ -5,6 +5,12 @@ from .qobuz import (
     QobuzDLProvider,
     QobuzDLUnavailableError,
 )
+from .streamrip import (
+    StreamripConfig,
+    StreamripDownloadError,
+    StreamripProvider,
+    StreamripUnavailableError,
+)
 
 __all__ = [
     "AcquiredTrack",
@@ -13,4 +19,8 @@ __all__ = [
     "QobuzDLDownloadError",
     "QobuzDLProvider",
     "QobuzDLUnavailableError",
+    "StreamripConfig",
+    "StreamripDownloadError",
+    "StreamripProvider",
+    "StreamripUnavailableError",
 ]
