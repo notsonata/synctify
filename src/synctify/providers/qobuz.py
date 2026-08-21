@@ -10,6 +10,8 @@ from ..models import Track
 from ..resolution import Candidate
 from .base import AcquiredTrack
 
+QOBUZ_DL_REPOSITORY = "https://github.com/Sei969/qobuz-dl"
+
 
 class QobuzDLUnavailableError(RuntimeError):
     pass
@@ -30,7 +32,7 @@ class QobuzDLConfig:
 
 
 class QobuzDLProvider:
-    """Out-of-process adapter for Sei969/qobuz-dl."""
+    """Invoke a separately cloned/installed Sei969/qobuz-dl executable."""
 
     name = "qobuz"
 
@@ -44,11 +46,12 @@ class QobuzDLProvider:
     def require_available(self) -> None:
         if not self.is_available():
             raise QobuzDLUnavailableError(
-                f"{self.config.executable!r} was not found on PATH. Install qobuz-dl-ultimate first."
+                f"{self.config.executable!r} was not found. Clone {QOBUZ_DL_REPOSITORY}, "
+                "complete its upstream setup, then put qobuz-dl on PATH or pass its executable path."
             )
 
     def search(self, track: Track) -> Sequence[Candidate]:
-        """Search remains disabled until qobuz-dl exposes stable machine-readable output."""
+        """Synctify does not depend on qobuz-dl internals or scrape its interactive output."""
         return ()
 
     def build_download_command(self, qobuz_url: str, destination: Path) -> list[str]:
