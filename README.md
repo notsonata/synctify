@@ -74,3 +74,4 @@ synctify sync <target>
 synctify backup <target>
 synctify clean --dry-run
 ```
+> Early development.
