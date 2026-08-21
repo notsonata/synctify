@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from typer.testing import CliRunner
+
+from synctify.cli_entry import app
 from synctify.db import connect, initialize
 from synctify.providers.base import AcquiredTrack
 from synctify.resolution import Candidate
@@ -193,8 +196,33 @@ def test_resolution_limit_freezes_same_distinct_track_set_across_sources(tmp_pat
 
     searched_ids = {spotify_id for spotify_id, _ in search.calls}
     assert len(searched_ids) == 1
+    selected_id = next(iter(searched_ids))
     assert search.calls == [
-        (next(iter(searched_ids)), "qobuz"),
-        (next(iter(searched_ids)), "tidal"),
+        (selected_id, "qobuz"),
+        (selected_id, "tidal"),
     ]
     assert sum(item.resolved for item in report.resolutions) == 1
+
+
+def test_cli_custom_source_order_is_used_for_fallback(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("SYNCTIFY_HOME", str(home))
+    monkeypatch.setattr("synctify.cli_entry._fetch_update_snapshot", lambda settings: _snapshot())
+    calls: list[str] = []
+
+    def fake_search(self, track, source: str, limit=None):
+        calls.append(source)
+        if source == "tidal":
+            return []
+        return [Candidate(source, f"{source}-match", track.title, track.artist)]
+
+    monkeypatch.setattr("synctify.cli_entry.StreamripCatalogSearch.search", fake_search)
+
+    result = CliRunner().invoke(
+        app,
+        ["update", "--dry-run", "--sources", "tidal,qobuz"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["tidal", "qobuz"]
+    assert "tidal -> qobuz" in result.output
