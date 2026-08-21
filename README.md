@@ -9,7 +9,7 @@ Spotify
    ↓
 Desired playlist/library state
    ↓
-Track matching
+Track resolution
    ↓
 Acquisition provider
    ↓
@@ -20,7 +20,7 @@ M3U8 playlists
    └── backup → pCloud
 ```
 
-The acquisition layer is intentionally provider-agnostic. Qobuz tooling, existing local files, or another source can be integrated behind an adapter without making playlist state, matching, or sync logic depend on one downloader.
+The acquisition layer is provider-agnostic. Qobuz tooling, existing local files, or another source can implement the same provider interface without making playlist state, matching, or sync logic depend on one downloader.
 
 Synctify uses Spotify for metadata and playlist state only. It does not download audio from Spotify.
 
@@ -29,22 +29,26 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 The project currently includes:
 
 - Python 3.12 package and `synctify` CLI
-- SQLite state database
+- SQLite state database with schema migrations
 - Spotify Authorization Code with PKCE login
 - OAuth refresh tokens stored in the system keychain
 - Liked Songs ingestion
-- owned playlist ingestion
-- collaborative playlist ingestion when Spotify grants item access
+- owned and accessible collaborative playlist ingestion
 - Spotify track ID and ISRC persistence
 - deterministic playlist ordering in SQLite
 - change planning for additions, removals, renames, and pure reorders
-- `synctify update --dry-run`
+- deterministic provider-neutral track resolution
+- exact ISRC matching before metadata matching
+- normalized title/artist/album fallback scoring with duration checks
+- ambiguity protection so close candidates are not silently accepted
+- persistent automatic and manual provider mappings
+- provider-neutral acquisition protocol for future Qobuz/local backends
 - UTF-8 M3U8 generation with relative paths
 - explicit mirror vs backup sync policy
 - rclone command planning
 - macOS GitHub Actions tests
 
-Track matching, audio acquisition, actual device transport, playlist generation from imported state, and pCloud snapshots remain future stages.
+A real acquisition provider, actual device transport, playlist generation from imported state, and pCloud snapshots remain future stages.
 
 ## Spotify setup
 
@@ -54,7 +58,7 @@ Create a Spotify developer application and add this exact Redirect URI:
 http://127.0.0.1:8765/callback
 ```
 
-Spotify no longer permits `localhost` aliases for this local OAuth flow. Synctify uses Authorization Code with PKCE, so a client secret is not stored in the application.
+Synctify uses Authorization Code with PKCE, so a client secret is not stored in the application.
 
 Then run:
 
@@ -62,7 +66,7 @@ Then run:
 synctify spotify login --client-id YOUR_SPOTIFY_CLIENT_ID
 ```
 
-The login opens Spotify in your browser. The resulting OAuth token is stored in the system keychain. The non-secret Client ID and redirect URI are stored in Synctify's application-data directory.
+The resulting OAuth token is stored in the system keychain. The non-secret Client ID and redirect URI are stored in Synctify's application-data directory.
 
 You can alternatively provide the Client ID through:
 
@@ -71,7 +75,7 @@ export SYNCTIFY_SPOTIFY_CLIENT_ID=YOUR_SPOTIFY_CLIENT_ID
 synctify spotify login
 ```
 
-Required scopes are limited to:
+Required scopes are:
 
 ```text
 user-library-read
@@ -85,37 +89,56 @@ Spotify's current API only exposes playlist items when the authenticated user ow
 
 ## Import Spotify state
 
-Import and persist the current Spotify state:
-
 ```bash
 synctify spotify pull
 ```
 
-This currently imports:
+This imports Liked Songs, accessible playlists, track order, `added_at`, Spotify IDs, ISRCs where available, title, artists, album, and duration.
 
-- Liked Songs as a Synctify-managed pseudo-playlist
-- playlists you own
-- collaborative playlists Spotify allows the account to read
-- track order and `added_at`
-- Spotify track IDs
-- ISRC where Spotify returns it
-- title, artists, album, and duration
-
-Local acquisition fields such as a future Qobuz mapping or local FLAC path are preserved when Spotify metadata is refreshed.
-
-To inspect changes without updating the database:
+Inspect changes without updating the database:
 
 ```bash
 synctify update --dry-run
 ```
 
-Apply the Spotify state:
+Apply them:
 
 ```bash
 synctify update
 ```
 
 At this stage `update` only updates desired Spotify state. It does not yet acquire audio or sync a device.
+
+## Track resolution
+
+Synctify resolves a Spotify track to a provider recording in this order:
+
+1. a stored manual override
+2. exact normalized ISRC
+3. normalized metadata scoring using title, artist, album, and duration
+4. unresolved or ambiguous when confidence is insufficient
+
+An automatic metadata match currently requires a score of at least `0.88`. If the top two candidates are within `0.04`, Synctify refuses to auto-select either candidate. Multiple effectively tied exact-ISRC results are also treated as ambiguous.
+
+The resolver itself is active, but no live acquisition provider is connected yet. The next provider implementation can call the resolver with search results and persist only safe matches.
+
+Inspect resolution counts:
+
+```bash
+synctify resolve status
+```
+
+Persist a manual mapping:
+
+```bash
+synctify resolve set SPOTIFY_TRACK_ID qobuz QOBUZ_TRACK_ID
+```
+
+Remove it:
+
+```bash
+synctify resolve clear SPOTIFY_TRACK_ID
+```
 
 ## Sync semantics
 
@@ -155,12 +178,14 @@ synctify spotify logout
 synctify spotify pull
 synctify update
 synctify update --dry-run
+synctify resolve status
+synctify resolve set <spotify-id> <provider> <provider-track-id>
+synctify resolve clear <spotify-id>
 ```
 
 Planned:
 
 ```text
-synctify resolve
 synctify playlists build
 synctify sync <target>
 synctify backup <target>
