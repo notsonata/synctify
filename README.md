@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.16.0**
+**Current version: 0.17.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -32,6 +32,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 - Python 3.12+ CLI
 - SQLite state database with migrations
 - top-level read-only setup diagnostics through `synctify doctor`
+- persistent defaults for source priority, downloader quality, and executable paths
 - Spotify PKCE authentication with refresh tokens in the system keychain
 - Liked Songs and owned/collaborative playlist ingestion
 - deterministic source matching with ambiguity protection
@@ -60,6 +61,69 @@ synctify init
 ```
 
 Set `SYNCTIFY_HOME` to override the default application-data directory.
+
+## Persistent configuration
+
+Synctify can store routine defaults in:
+
+```text
+<SYNCTIFY_HOME>/config.json
+```
+
+Only explicit overrides are written. Missing keys continue to use environment variables or built-in defaults.
+
+Inspect effective values:
+
+```bash
+synctify config show
+```
+
+Set defaults:
+
+```bash
+synctify config set source-priority qobuz,tidal,deezer,soundcloud
+synctify config set qobuz-dl /path/to/qobuz-dl
+synctify config set streamrip /opt/homebrew/bin/rip
+synctify config set rclone /opt/homebrew/bin/rclone
+synctify config set qobuz-quality 27
+synctify config set streamrip-qobuz-quality 4
+synctify config set streamrip-tidal-quality 3
+synctify config set streamrip-deezer-quality 2
+synctify config set streamrip-soundcloud-quality 2
+```
+
+Remove one saved override:
+
+```bash
+synctify config unset source-priority
+```
+
+Precedence is:
+
+```text
+explicit CLI flag > environment variable > saved config > built-in default
+```
+
+Executable environment variables remain supported:
+
+```text
+SYNCTIFY_QOBUZ_DL
+SYNCTIFY_STREAMRIP
+SYNCTIFY_RCLONE
+```
+
+Source/quality environment overrides are also supported:
+
+```text
+SYNCTIFY_SOURCES
+SYNCTIFY_QOBUZ_QUALITY
+SYNCTIFY_STREAMRIP_QOBUZ_QUALITY
+SYNCTIFY_STREAMRIP_TIDAL_QUALITY
+SYNCTIFY_STREAMRIP_DEEZER_QUALITY
+SYNCTIFY_STREAMRIP_SOUNDCLOUD_QUALITY
+```
+
+Saved executable defaults are used by `doctor`, `resolve auto`, `update`, `acquire`, `sync`, `backup`, and the downloader-specific doctor commands. Saved downloader quality defaults are used by routine acquisition and coordinated updates when no more specific override applies.
 
 ## Diagnostics
 
@@ -198,7 +262,7 @@ git clone https://github.com/Sei969/qobuz-dl.git
 synctify qobuz doctor
 ```
 
-Complete qobuz-dl's upstream authentication/setup separately. Put the executable on `PATH`, pass `--qobuz-dl`, or use `SYNCTIFY_QOBUZ_DL`.
+Complete qobuz-dl's upstream authentication/setup separately. Put the executable on `PATH`, pass `--qobuz-dl`, set `SYNCTIFY_QOBUZ_DL`, or save it with `synctify config set qobuz-dl ...`.
 
 ### Streamrip
 
@@ -209,7 +273,7 @@ brew install streamrip
 synctify streamrip doctor
 ```
 
-Put `rip` on `PATH`, pass `--streamrip`, or use `SYNCTIFY_STREAMRIP`.
+Put `rip` on `PATH`, pass `--streamrip`, set `SYNCTIFY_STREAMRIP`, or save it with `synctify config set streamrip ...`.
 
 ## Acquisition
 
