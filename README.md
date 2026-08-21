@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.18.0**
+**Current version: 0.19.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -31,6 +31,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 
 - Python 3.12+ CLI
 - first-run interactive and scripted setup through `synctify setup`
+- portable setup metadata export/import for migration between Macs
 - SQLite state database with migrations
 - top-level read-only setup diagnostics through `synctify doctor`
 - persistent defaults for source priority, downloader quality, and executable paths
@@ -118,6 +119,49 @@ Add `--spotify-login` when you explicitly want setup to launch browser OAuth aft
 After setup:
 
 ```bash
+synctify doctor
+```
+
+## Portable setup migration
+
+Export reproducible setup metadata to a JSON file:
+
+```bash
+synctify export synctify-portable.json
+```
+
+The portable format is versioned and contains only:
+
+- explicit values saved in `config.json`
+- the public Spotify Client ID and redirect URI from `spotify.json`, when configured
+- filesystem mirror and rclone backup target definitions
+
+It intentionally does **not** contain Spotify access/refresh tokens, keychain data, local FLAC paths or hashes, playlist/track rows, source-resolution state, acquisition state, sync history, or cloud snapshot history.
+
+Export refuses to overwrite an existing file unless explicitly requested:
+
+```bash
+synctify export synctify-portable.json --force
+```
+
+On another Mac, preview the import first:
+
+```bash
+synctify import synctify-portable.json
+```
+
+Preview mode validates the whole file and target compatibility without creating the Synctify home or changing local state. Apply it explicitly with:
+
+```bash
+synctify import synctify-portable.json --apply
+```
+
+Import merges only the saved config keys present in the bundle, so unrelated machine-local overrides are preserved. Public Spotify configuration is created or replaced as shown in the preview, but no Spotify token is imported. Existing identical targets are reused. A target with the same name but different settings aborts the import before config changes are written.
+
+After migration, authenticate Spotify on the new Mac and verify the setup:
+
+```bash
+synctify spotify login
 synctify doctor
 ```
 
