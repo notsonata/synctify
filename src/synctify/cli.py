@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import typer
 
 from .config import Settings
 from .db import connect, initialize
+from .providers.qobuz import QobuzDLConfig, QobuzDLDownloadError, QobuzDLProvider, QobuzDLUnavailableError
 from .resolution import clear_resolution, set_manual_override
 from .spotify.auth import DEFAULT_REDIRECT_URI, KeyringTokenStore, SpotifyAuth, SpotifyAuthError, SpotifyOAuthConfig, interactive_login, resolve_config
 from .spotify.client import SpotifyAPIError, SpotifyClient
@@ -15,8 +17,10 @@ from .spotify.state import ChangePlan, apply_snapshot, format_plan, plan_snapsho
 app = typer.Typer(name="synctify", help="Local-first Spotify playlist and lossless music library synchronizer.", no_args_is_help=True)
 spotify_app = typer.Typer(help="Authenticate with Spotify and import desired library state.")
 resolve_app = typer.Typer(help="Inspect and manage provider track resolutions.")
+qobuz_app = typer.Typer(help="Inspect and run the qobuz-dl acquisition provider.")
 app.add_typer(spotify_app, name="spotify")
 app.add_typer(resolve_app, name="resolve")
+app.add_typer(qobuz_app, name="qobuz")
 
 
 def _settings_with_database() -> Settings:
@@ -151,6 +155,35 @@ def resolve_clear(spotify_id: str) -> None:
         typer.echo(f"No resolution stored for {spotify_id}")
         raise typer.Exit(code=1)
     typer.echo(f"Cleared resolution for {spotify_id}")
+
+
+@qobuz_app.command("doctor")
+def qobuz_doctor(executable: str = typer.Option("qobuz-dl", "--executable")) -> None:
+    """Check whether the qobuz-dl executable is available."""
+    provider = QobuzDLProvider(QobuzDLConfig(executable=executable))
+    if not provider.is_available():
+        typer.echo(f"qobuz-dl not found: {executable}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"qobuz-dl available: {executable}")
+
+
+@qobuz_app.command("download-url")
+def qobuz_download_url(
+    url: str,
+    destination: Path = typer.Option(..., "--destination", "-d", file_okay=False),
+    quality: int = typer.Option(27, "--quality", "-q", min=5),
+    executable: str = typer.Option("qobuz-dl", "--executable"),
+) -> None:
+    """Acquire a Qobuz URL through the installed qobuz-dl executable."""
+    provider = QobuzDLProvider(QobuzDLConfig(executable=executable, quality=quality))
+    try:
+        files = provider.acquire_url(url, destination)
+    except (QobuzDLUnavailableError, QobuzDLDownloadError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(f"qobuz-dl completed. New FLAC files: {len(files)}")
+    for path in files:
+        typer.echo(str(path))
 
 
 @app.command()
