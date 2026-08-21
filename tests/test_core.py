@@ -5,14 +5,14 @@ import sqlite3
 
 import pytest
 
-from spotisync.db import initialize
-from spotisync.models import Playlist, Track
-from spotisync.playlists import MissingLocalTrackError, render_m3u8, safe_playlist_filename
-from spotisync.sync import SyncMode, SyncTarget, destination_deletes_enabled, rclone_command
+from synctify.db import initialize
+from synctify.models import Playlist, Track
+from synctify.playlists import MissingLocalTrackError, render_m3u8, safe_playlist_filename
+from synctify.sync import SyncMode, SyncTarget, destination_deletes_enabled, rclone_command
 
 
 def test_initialize_creates_schema(tmp_path: Path) -> None:
-    database = tmp_path / "state" / "spotisync.sqlite3"
+    database = tmp_path / "state" / "synctify.sqlite3"
     initialize(database)
 
     with sqlite3.connect(database) as connection:
@@ -66,7 +66,7 @@ def test_m3u8_rejects_unresolved_track(tmp_path: Path) -> None:
 
 def test_sync_modes_have_different_delete_semantics(tmp_path: Path) -> None:
     mirror = SyncTarget("phone", "/Volumes/Phone/Music", SyncMode.MIRROR)
-    backup = SyncTarget("pcloud", "pcloud:SpotiSync", SyncMode.BACKUP)
+    backup = SyncTarget("pcloud", "pcloud:Synctify", SyncMode.BACKUP)
 
     assert rclone_command(tmp_path, mirror)[1] == "sync"
     assert rclone_command(tmp_path, backup)[1] == "copy"
