@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
-from typing import Sequence
 
 
 @dataclass(slots=True, frozen=True)
@@ -67,6 +66,18 @@ def _track_candidate(row: sqlite3.Row, library_dir: Path) -> CollectibleTrack:
             exists=False,
             safe_to_delete=False,
             reason=f"could not resolve path: {exc}",
+        )
+
+    if row["local_path_users"] > 1:
+        return CollectibleTrack(
+            spotify_id=row["spotify_id"],
+            title=row["title"],
+            artist=row["artist"],
+            path=resolved,
+            size_bytes=None,
+            exists=resolved.exists(),
+            safe_to_delete=False,
+            reason="local path is shared by multiple track records",
         )
 
     if not _is_within(resolved, root):
@@ -137,7 +148,16 @@ def collectible_tracks(
     """Return local tracks with zero references from the current desired playlist state."""
     rows = connection.execute(
         """
-        SELECT t.spotify_id, t.title, t.artist, t.local_path
+        SELECT
+            t.spotify_id,
+            t.title,
+            t.artist,
+            t.local_path,
+            (
+                SELECT COUNT(*)
+                FROM tracks AS other
+                WHERE other.local_path = t.local_path
+            ) AS local_path_users
         FROM tracks AS t
         WHERE t.local_path IS NOT NULL
           AND t.local_path != ''
