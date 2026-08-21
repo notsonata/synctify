@@ -13,6 +13,7 @@ class Settings:
     library_dir: Path
     playlists_dir: Path
     database_path: Path
+    spotify_config_path: Path
 
     @classmethod
     def default(cls) -> "Settings":
@@ -23,6 +24,7 @@ class Settings:
             library_dir=home / "library",
             playlists_dir=home / "playlists",
             database_path=home / "synctify.sqlite3",
+            spotify_config_path=home / "spotify.json",
         )
 
     def ensure_directories(self) -> None:
