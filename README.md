@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.7.0**
+**Current version: 0.8.0**
 
 Synctify is a local-first macOS music library manager. Spotify provides desired playlist/library state, Synctify keeps one canonical local lossless library, generates UTF-8 M3U8 playlists, mirrors that library to devices, and can maintain a non-destructive cloud backup.
 
@@ -25,7 +25,7 @@ Canonical local library
    ↓
 M3U8 playlists
    ├── mirror → phone / external drive
-   └── backup → pCloud
+   └── backup → pCloud / rclone remote
 ```
 
 Synctify uses Spotify for metadata and playlist state only. It does not download audio from Spotify. Source-service identity and downloader choice are separate concepts: a track can be resolved to Tidal while Streamrip performs the transfer, or resolved to Qobuz while qobuz-dl performs the transfer.
@@ -50,9 +50,11 @@ Synctify currently includes:
 - strict and opt-in partial playlist handling
 - mounted-filesystem mirror targets using rclone
 - deletion propagation for device mirrors
+- non-destructive rclone cloud backups
+- timestamped playlist backup history
 - macOS GitHub Actions tests
 
-pCloud snapshots, automatic non-Qobuz search/resolution adapters, and garbage collection remain future stages.
+Automatic non-Qobuz search/resolution adapters and garbage collection remain future stages.
 
 ## Spotify setup
 
@@ -124,7 +126,7 @@ Remove one:
 synctify resolve clear SPOTIFY_TRACK_ID
 ```
 
-At present, Qobuz is the primary planned automatic resolution source. Non-Qobuz Streamrip sources can already be acquired when a resolution is stored manually; automatic Tidal/Deezer/SoundCloud candidate search can be added later without changing the downloader boundary.
+At present, Qobuz is the primary planned automatic resolution source. Non-Qobuz Streamrip sources can already be acquired when a resolution is stored manually.
 
 ## External downloaders
 
@@ -289,13 +291,68 @@ Remove only the target configuration, without deleting files from the device:
 synctify targets remove phone
 ```
 
+## pCloud and rclone backups
+
+Cloud backups use an rclone remote. pCloud is the intended backend, but the backup layer only requires an rclone remote path.
+
+Configure pCloud with rclone first:
+
+```bash
+rclone config
+```
+
+For example, if the configured remote is named `pcloud`, add it to Synctify like this:
+
+```bash
+synctify targets add-backup cloud pcloud:Synctify
+```
+
+Preview the backup:
+
+```bash
+synctify backup cloud --dry-run
+```
+
+Run it:
+
+```bash
+synctify backup cloud
+```
+
+The remote layout is:
+
+```text
+pcloud:Synctify/
+├── library/
+└── playlists/
+    ├── current/
+    └── snapshots/
+        ├── Driving/
+        │   ├── 2026-08-21T150000Z.m3u8
+        │   └── 2026-08-24T183211Z.m3u8
+        └── Liked Songs/
+            └── 2026-08-21T150000Z.m3u8
+```
+
+Backup semantics are intentionally different from device mirroring:
+
+- `library/` uses `rclone copy`, so deleting a local FLAC does not delete its remote backup
+- a playlist snapshot is uploaded only when that local M3U8 changed since its last successful snapshot for that target
+- `playlists/snapshots/` is never synchronized or deleted by Synctify
+- `playlists/current/` uses `rclone sync` so it represents the latest generated playlist set
+- deleting a playlist may remove it from `current/`, while historical snapshots remain
+- a failed stage stops later stages from running
+- dry runs do not write snapshot history to SQLite
+
+This keeps the audio backup non-destructive while preserving a clear current playlist view and historical playlist states.
+
 ## Sync semantics
 
 Synctify treats device synchronization and cloud backup as different operations:
 
 - **Mirror** targets use source-of-truth semantics. Files removed locally are removed from the destination on the next sync. This is implemented for mounted filesystem targets.
-- **Backup** targets are append/update-only. Remote-only files are never deleted just because they were deleted locally. This is planned for pCloud.
-- Playlist backup snapshots will be versioned separately so historical M3U8 states can be retained.
+- **Backup** targets keep remote-only audio files. Local FLAC deletion is not propagated to cloud backup storage.
+- Playlist backup history is append-only, while the separate `current/` playlist view mirrors the local playlist set.
 
 ## Development
 
@@ -338,15 +395,17 @@ synctify acquire --dry-run
 synctify playlists build
 synctify playlists build --allow-partial
 synctify targets add <name> <destination>
+synctify targets add-backup <name> <remote:path>
 synctify targets list
 synctify targets remove <name>
 synctify sync <target>
 synctify sync <target> --dry-run
+synctify backup <target>
+synctify backup <target> --dry-run
 ```
 
 Planned:
 
 ```text
-synctify backup <target>
 synctify clean --dry-run
 ```
