@@ -1,6 +1,6 @@
-# SpotiSync
+# Synctify
 
-SpotiSync is a local-first macOS music library manager that uses Spotify as playlist/library state, keeps one canonical local lossless library, generates UTF-8 M3U8 playlists, mirrors that library to devices, and can maintain a non-destructive cloud backup.
+Synctify is a local-first macOS music library manager that uses Spotify as playlist/library state, keeps one canonical local lossless library, generates UTF-8 M3U8 playlists, mirrors that library to devices, and can maintain a non-destructive cloud backup.
 
 ## Intended workflow
 
@@ -24,7 +24,7 @@ The acquisition layer is intentionally provider-agnostic. Qobuz tooling can be i
 
 ## Sync semantics
 
-SpotiSync treats device synchronization and cloud backup as different operations:
+Synctify treats device synchronization and cloud backup as different operations:
 
 - **Mirror** targets use source-of-truth semantics. Files removed locally are removed from the destination on the next sync. This is intended for phones and external drives.
 - **Backup** targets are append/update-only. Remote-only files are never deleted just because they were deleted locally. This is intended for pCloud.
@@ -34,7 +34,7 @@ SpotiSync treats device synchronization and cloud backup as different operations
 
 The initial foundation includes:
 
-- Python 3.12 package and `spotisync` CLI
+- Python 3.12 package and `synctify` CLI
 - macOS-friendly application data paths
 - SQLite schema for tracks, Spotify/Qobuz mappings, playlists, sync targets, and sync runs
 - deterministic UTF-8 M3U8 generation using relative paths
@@ -56,21 +56,21 @@ pytest
 Initialize local state:
 
 ```bash
-spotisync init
-spotisync status
+synctify init
+synctify status
 ```
 
-Set `SPOTISYNC_HOME` to override the default application data directory during development or testing.
+Set `SYNCTIFY_HOME` to override the default application data directory during development or testing.
 
 ## Planned commands
 
 ```text
-spotisync init
-spotisync status
-spotisync update
-spotisync resolve
-spotisync playlists build
-spotisync sync <target>
-spotisync backup <target>
-spotisync clean --dry-run
+synctify init
+synctify status
+synctify update
+synctify resolve
+synctify playlists build
+synctify sync <target>
+synctify backup <target>
+synctify clean --dry-run
 ```
