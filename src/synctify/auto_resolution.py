@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import sqlite3
 from typing import Protocol, Sequence
 
@@ -94,7 +95,7 @@ def pending_resolution_tracks(
             album=row["album"],
             isrc=row["isrc"],
             duration_ms=row["duration_ms"],
-            local_path=None if not row["local_path"] else __import__("pathlib").Path(row["local_path"]),
+            local_path=None if not row["local_path"] else Path(row["local_path"]),
         )
         for row in rows
     )
