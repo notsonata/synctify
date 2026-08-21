@@ -1,13 +1,21 @@
 from __future__ import annotations
 
-import sqlite3
+import os
 from pathlib import Path
+import sqlite3
 
 import typer
 
+from .acquisition import acquire_tasks, format_acquisition_plan, pending_acquisitions
 from .config import Settings
 from .db import connect, initialize
-from .providers.qobuz import QobuzDLConfig, QobuzDLDownloadError, QobuzDLProvider, QobuzDLUnavailableError
+from .providers.qobuz import (
+    QOBUZ_DL_REPOSITORY,
+    QobuzDLConfig,
+    QobuzDLDownloadError,
+    QobuzDLProvider,
+    QobuzDLUnavailableError,
+)
 from .resolution import clear_resolution, set_manual_override
 from .spotify.auth import DEFAULT_REDIRECT_URI, KeyringTokenStore, SpotifyAuth, SpotifyAuthError, SpotifyOAuthConfig, interactive_login, resolve_config
 from .spotify.client import SpotifyAPIError, SpotifyClient
@@ -17,7 +25,7 @@ from .spotify.state import ChangePlan, apply_snapshot, format_plan, plan_snapsho
 app = typer.Typer(name="synctify", help="Local-first Spotify playlist and lossless music library synchronizer.", no_args_is_help=True)
 spotify_app = typer.Typer(help="Authenticate with Spotify and import desired library state.")
 resolve_app = typer.Typer(help="Inspect and manage provider track resolutions.")
-qobuz_app = typer.Typer(help="Inspect and run the qobuz-dl acquisition provider.")
+qobuz_app = typer.Typer(help="Inspect and run the external qobuz-dl downloader.")
 app.add_typer(spotify_app, name="spotify")
 app.add_typer(resolve_app, name="resolve")
 app.add_typer(qobuz_app, name="qobuz")
@@ -43,6 +51,21 @@ def _fetch_and_plan(*, apply: bool) -> ChangePlan:
     return plan
 
 
+def _qobuz_executable(value: str | None) -> str:
+    return value or os.getenv("SYNCTIFY_QOBUZ_DL", "qobuz-dl")
+
+
+def _qobuz_config(executable: str | None, quality: int, *, managed: bool = False) -> QobuzDLConfig:
+    if quality not in {5, 6, 7, 27}:
+        raise typer.BadParameter("Qobuz quality must be one of: 5, 6, 7, 27")
+    extra_args = ("--no-db",) if managed else ()
+    return QobuzDLConfig(
+        executable=_qobuz_executable(executable),
+        quality=quality,
+        extra_args=extra_args,
+    )
+
+
 @app.command()
 def init() -> None:
     """Create the local Synctify directories and SQLite database."""
@@ -64,6 +87,7 @@ def status() -> None:
             unresolved = connection.execute("SELECT COUNT(*) FROM tracks WHERE status = 'unresolved'").fetchone()[0]
             playlists = connection.execute("SELECT COUNT(*) FROM playlists").fetchone()[0]
             resolutions = connection.execute("SELECT COUNT(*) FROM track_resolutions").fetchone()[0]
+            pending = len(pending_acquisitions(connection))
             last_pull = connection.execute("SELECT value FROM metadata WHERE key = 'spotify_last_pull_at'").fetchone()
     except sqlite3.DatabaseError as exc:
         typer.echo(f"Database error: {exc}", err=True)
@@ -73,6 +97,7 @@ def status() -> None:
     typer.echo(f"  Local FLACs: {local_tracks}")
     typer.echo(f"  Unresolved:  {unresolved}")
     typer.echo(f"  Resolutions: {resolutions}")
+    typer.echo(f"  Pending DL:  {pending}")
     typer.echo(f"  Playlists:   {playlists}")
     typer.echo(f"  Spotify:     {last_pull[0] if last_pull else 'never pulled'}")
     typer.echo(f"  Library:     {settings.library_dir}")
@@ -158,24 +183,26 @@ def resolve_clear(spotify_id: str) -> None:
 
 
 @qobuz_app.command("doctor")
-def qobuz_doctor(executable: str = typer.Option("qobuz-dl", "--executable")) -> None:
-    """Check whether the qobuz-dl executable is available."""
-    provider = QobuzDLProvider(QobuzDLConfig(executable=executable))
+def qobuz_doctor(executable: str | None = typer.Option(None, "--executable")) -> None:
+    """Check whether the separately cloned qobuz-dl executable is available."""
+    resolved = _qobuz_executable(executable)
+    provider = QobuzDLProvider(QobuzDLConfig(executable=resolved))
     if not provider.is_available():
-        typer.echo(f"qobuz-dl not found: {executable}", err=True)
+        typer.echo(f"qobuz-dl not found: {resolved}", err=True)
+        typer.echo(f"Clone and set up: {QOBUZ_DL_REPOSITORY}", err=True)
         raise typer.Exit(code=1)
-    typer.echo(f"qobuz-dl available: {executable}")
+    typer.echo(f"qobuz-dl available: {resolved}")
 
 
 @qobuz_app.command("download-url")
 def qobuz_download_url(
     url: str,
     destination: Path = typer.Option(..., "--destination", "-d", file_okay=False),
-    quality: int = typer.Option(27, "--quality", "-q", min=5),
-    executable: str = typer.Option("qobuz-dl", "--executable"),
+    quality: int = typer.Option(27, "--quality", "-q"),
+    executable: str | None = typer.Option(None, "--executable"),
 ) -> None:
-    """Acquire a Qobuz URL through the installed qobuz-dl executable."""
-    provider = QobuzDLProvider(QobuzDLConfig(executable=executable, quality=quality))
+    """Acquire a Qobuz URL through the external qobuz-dl executable."""
+    provider = QobuzDLProvider(_qobuz_config(executable, quality))
     try:
         files = provider.acquire_url(url, destination)
     except (QobuzDLUnavailableError, QobuzDLDownloadError, ValueError) as exc:
@@ -187,8 +214,40 @@ def qobuz_download_url(
 
 
 @app.command()
+def acquire(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show resolved tracks waiting for download."),
+    limit: int | None = typer.Option(None, "--limit", min=1),
+    quality: int = typer.Option(27, "--quality", "-q"),
+    qobuz_dl: str | None = typer.Option(None, "--qobuz-dl", help="Path to the qobuz-dl executable from the external clone."),
+) -> None:
+    """Download already-resolved Qobuz tracks into the canonical local library."""
+    settings = _settings_with_database()
+    with connect(settings.database_path) as connection:
+        tasks = pending_acquisitions(connection, provider="qobuz", limit=limit)
+        typer.echo(format_acquisition_plan(tasks))
+        if dry_run or not tasks:
+            return
+
+        provider = QobuzDLProvider(_qobuz_config(qobuz_dl, quality, managed=True))
+        try:
+            provider.require_available()
+        except QobuzDLUnavailableError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+
+        report = acquire_tasks(connection, provider, tasks, settings.library_dir)
+
+    typer.echo(f"Acquired: {report.succeeded}")
+    typer.echo(f"Failed:   {report.failed}")
+    for failure in report.failures:
+        typer.echo(f"  {failure.spotify_id}: {failure.message}", err=True)
+    if report.failed:
+        raise typer.Exit(code=2)
+
+
+@app.command()
 def update(dry_run: bool = typer.Option(False, "--dry-run", help="Fetch Spotify and show changes without modifying local state.")) -> None:
-    """Refresh Spotify desired state. Acquisition and device sync are added in later stages."""
+    """Refresh Spotify desired state. Acquisition remains an explicit separate step."""
     try:
         plan = _fetch_and_plan(apply=not dry_run)
     except (SpotifyAuthError, SpotifyAPIError) as exc:
@@ -198,7 +257,7 @@ def update(dry_run: bool = typer.Option(False, "--dry-run", help="Fetch Spotify 
     if dry_run:
         typer.echo("Dry run only. Local state was not changed.")
     else:
-        typer.echo("Spotify desired state updated. Audio acquisition is not implemented yet.")
+        typer.echo("Spotify desired state updated. Run `synctify acquire --dry-run` to inspect pending downloads.")
 
 
 if __name__ == "__main__":
