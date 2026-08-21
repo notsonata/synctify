@@ -5,6 +5,7 @@ from pathlib import Path
 
 import typer
 
+from . import cli_entry as cli_entry_module
 from .cli import (
     _qobuz_config,
     acquire as base_acquire,
@@ -18,8 +19,6 @@ from .cli import (
     sync_command as base_sync,
 )
 from .cli_entry import (
-    _fetch_update_snapshot,
-    _update_source_priority,
     resolve_app,
     resolve_auto_command as base_resolve_auto,
 )
@@ -234,7 +233,7 @@ def configured_update(
             results_per_query=search_results,
         )
     )
-    priority = _update_source_priority(
+    priority = cli_entry_module._update_source_priority(
         search_provider,
         source=source,
         sources=",".join(configured_sources),
@@ -243,7 +242,7 @@ def configured_update(
     settings.ensure_directories()
     initialize(settings.database_path)
     try:
-        snapshot = _fetch_update_snapshot(settings)
+        snapshot = cli_entry_module._fetch_update_snapshot(settings)
     except (SpotifyAuthError, SpotifyAPIError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
