@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS sync_runs (
     removed INTEGER NOT NULL DEFAULT 0,
     failed INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS playlist_backup_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id INTEGER NOT NULL REFERENCES sync_targets(id) ON DELETE CASCADE,
+    playlist_file TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    remote_path TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlist_backup_snapshots_latest
+ON playlist_backup_snapshots(target_id, playlist_file, id);
 """
 
 
@@ -129,6 +141,17 @@ def _migrate(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_track_resolutions_provider
         ON track_resolutions(provider, provider_track_id);
+
+        CREATE TABLE IF NOT EXISTS playlist_backup_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_id INTEGER NOT NULL REFERENCES sync_targets(id) ON DELETE CASCADE,
+            playlist_file TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            remote_path TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_playlist_backup_snapshots_latest
+        ON playlist_backup_snapshots(target_id, playlist_file, id);
         """
     )
 
