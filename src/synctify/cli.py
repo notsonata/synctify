@@ -7,6 +7,7 @@ import sqlite3
 import typer
 
 from .acquisition import acquire_tasks, format_acquisition_plan, pending_acquisitions
+from .backup import add_rclone_backup_target, run_rclone_backup
 from .config import Settings
 from .db import connect, initialize
 from .playlists import build_playlists, format_build_report
@@ -58,7 +59,7 @@ resolve_app = typer.Typer(help="Inspect and manage source-service track resoluti
 qobuz_app = typer.Typer(help="Inspect and run the external qobuz-dl downloader.")
 streamrip_app = typer.Typer(help="Inspect the external Streamrip downloader.")
 playlists_app = typer.Typer(help="Build M3U8 playlists from local Synctify state.")
-targets_app = typer.Typer(help="Manage filesystem mirror targets.")
+targets_app = typer.Typer(help="Manage mirror and backup targets.")
 app.add_typer(spotify_app, name="spotify")
 app.add_typer(resolve_app, name="resolve")
 app.add_typer(qobuz_app, name="qobuz")
@@ -259,9 +260,7 @@ def resolve_status() -> None:
     settings = _settings_with_database()
     with connect(settings.database_path) as connection:
         total = connection.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-        resolved = connection.execute(
-            "SELECT COUNT(*) FROM track_resolutions"
-        ).fetchone()[0]
+        resolved = connection.execute("SELECT COUNT(*) FROM track_resolutions").fetchone()[0]
         manual = connection.execute(
             "SELECT COUNT(*) FROM track_resolutions WHERE is_manual = 1"
         ).fetchone()[0]
@@ -444,9 +443,22 @@ def targets_add(name: str, destination: Path) -> None:
     typer.echo(f"Added mirror target {target.name}: {target.destination}")
 
 
+@targets_app.command("add-backup")
+def targets_add_backup(name: str, destination: str) -> None:
+    """Add a non-destructive rclone backup target, such as pCloud."""
+    settings = _settings_with_database()
+    try:
+        with connect(settings.database_path) as connection:
+            target = add_rclone_backup_target(connection, name, destination)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Added backup target {target.name}: {target.destination}")
+
+
 @targets_app.command("list")
 def targets_list() -> None:
-    """List configured sync targets."""
+    """List configured sync and backup targets."""
     settings = _settings_with_database()
     with connect(settings.database_path) as connection:
         targets = list_sync_targets(connection)
@@ -461,7 +473,7 @@ def targets_list() -> None:
 
 @targets_app.command("remove")
 def targets_remove(name: str) -> None:
-    """Remove a configured sync target without touching its files."""
+    """Remove a configured target without touching its files."""
     settings = _settings_with_database()
     with connect(settings.database_path) as connection:
         removed = remove_sync_target(connection, name)
@@ -518,6 +530,57 @@ def sync_command(
         typer.echo("Dry run complete. Destination was not modified.")
     else:
         typer.echo("Mirror complete. Destination-only files under library/ and playlists/ were removed.")
+
+
+@app.command("backup")
+def backup_command(
+    target_name: str,
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview the cloud backup without modifying remote or snapshot state.",
+    ),
+    rclone: str = typer.Option("rclone", "--rclone", help="Path to the rclone executable."),
+) -> None:
+    """Back up the library and versioned playlists to an rclone remote."""
+    settings = _settings_with_database()
+    try:
+        with connect(settings.database_path) as connection:
+            target = get_sync_target(connection, target_name)
+            report = run_rclone_backup(
+                connection,
+                target,
+                library_dir=settings.library_dir,
+                playlists_dir=settings.playlists_dir,
+                dry_run=dry_run,
+                executable=rclone,
+            )
+    except SyncTargetNotFoundError as exc:
+        typer.echo(f"Unknown backup target: {target_name}", err=True)
+        raise typer.Exit(code=1) from exc
+    except (RcloneUnavailableError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(f"Target: {report.target.name} -> {report.target.destination}")
+    typer.echo("Mode: dry-run" if report.dry_run else "Mode: backup")
+    typer.echo(f"Playlist snapshots planned: {len(report.snapshots)}")
+    for result in report.results:
+        typer.echo(f"[{result.label}] {' '.join(result.command)}")
+        if result.stdout.strip():
+            typer.echo(result.stdout.strip())
+        if result.stderr.strip():
+            typer.echo(result.stderr.strip(), err=result.returncode != 0)
+
+    if not report.ok:
+        typer.echo("Backup failed before all stages completed.", err=True)
+        raise typer.Exit(code=2)
+    if report.dry_run:
+        typer.echo("Dry run complete. Remote and snapshot history were not modified.")
+    else:
+        typer.echo(
+            "Backup complete. Library deletions were not propagated; playlist snapshots were retained."
+        )
 
 
 @app.command()

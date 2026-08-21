@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sqlite3
 
-from synctify.db import connect, initialize
+from synctify.db import SCHEMA_VERSION, connect, initialize
 from synctify.models import Track
 from synctify.providers import AcquiredTrack, AcquisitionProvider
 from synctify.resolution import (
@@ -174,7 +174,8 @@ def test_v2_database_migrates_to_resolution_schema(tmp_path: Path) -> None:
         version = connection.execute("SELECT value FROM metadata WHERE key = 'schema_version'").fetchone()[0]
 
     assert "track_resolutions" in tables
-    assert version == "3"
+    assert "playlist_backup_snapshots" in tables
+    assert version == SCHEMA_VERSION
 
 
 def test_acquisition_provider_protocol_is_runtime_checkable(tmp_path: Path) -> None:
