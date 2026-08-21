@@ -9,12 +9,20 @@ import typer
 from .acquisition import acquire_tasks, format_acquisition_plan, pending_acquisitions
 from .config import Settings
 from .db import connect, initialize
+from .playlists import build_playlists, format_build_report
 from .providers.qobuz import (
     QOBUZ_DL_REPOSITORY,
     QobuzDLConfig,
     QobuzDLDownloadError,
     QobuzDLProvider,
     QobuzDLUnavailableError,
+)
+from .providers.streamrip import (
+    STREAMRIP_REPOSITORY,
+    StreamripConfig,
+    StreamripDownloadError,
+    StreamripProvider,
+    StreamripUnavailableError,
 )
 from .resolution import clear_resolution, set_manual_override
 from .spotify.auth import DEFAULT_REDIRECT_URI, KeyringTokenStore, SpotifyAuth, SpotifyAuthError, SpotifyOAuthConfig, interactive_login, resolve_config
@@ -26,9 +34,13 @@ app = typer.Typer(name="synctify", help="Local-first Spotify playlist and lossle
 spotify_app = typer.Typer(help="Authenticate with Spotify and import desired library state.")
 resolve_app = typer.Typer(help="Inspect and manage provider track resolutions.")
 qobuz_app = typer.Typer(help="Inspect and run the external qobuz-dl downloader.")
+streamrip_app = typer.Typer(help="Inspect the external streamrip downloader.")
+playlists_app = typer.Typer(help="Build M3U8 playlists from local Synctify state.")
 app.add_typer(spotify_app, name="spotify")
 app.add_typer(resolve_app, name="resolve")
 app.add_typer(qobuz_app, name="qobuz")
+app.add_typer(streamrip_app, name="streamrip")
+app.add_typer(playlists_app, name="playlists")
 
 
 def _settings_with_database() -> Settings:
@@ -55,15 +67,41 @@ def _qobuz_executable(value: str | None) -> str:
     return value or os.getenv("SYNCTIFY_QOBUZ_DL", "qobuz-dl")
 
 
+def _streamrip_executable(value: str | None) -> str:
+    return value or os.getenv("SYNCTIFY_STREAMRIP", "rip")
+
+
 def _qobuz_config(executable: str | None, quality: int, *, managed: bool = False) -> QobuzDLConfig:
     if quality not in {5, 6, 7, 27}:
-        raise typer.BadParameter("Qobuz quality must be one of: 5, 6, 7, 27")
+        raise typer.BadParameter("qobuz-dl quality must be one of: 5, 6, 7, 27")
     extra_args = ("--no-db",) if managed else ()
     return QobuzDLConfig(
         executable=_qobuz_executable(executable),
         quality=quality,
         extra_args=extra_args,
     )
+
+
+def _acquisition_provider(
+    downloader: str,
+    quality: int | None,
+    qobuz_dl: str | None,
+    streamrip: str | None,
+):
+    normalized = downloader.strip().lower()
+    if normalized == "qobuz-dl":
+        return QobuzDLProvider(_qobuz_config(qobuz_dl, 27 if quality is None else quality, managed=True))
+    if normalized == "streamrip":
+        selected_quality = 4 if quality is None else quality
+        if selected_quality not in {0, 1, 2, 3, 4}:
+            raise typer.BadParameter("streamrip quality must be between 0 and 4")
+        return StreamripProvider(
+            StreamripConfig(
+                executable=_streamrip_executable(streamrip),
+                quality=selected_quality,
+            )
+        )
+    raise typer.BadParameter("downloader must be one of: qobuz-dl, streamrip")
 
 
 @app.command()
@@ -184,7 +222,7 @@ def resolve_clear(spotify_id: str) -> None:
 
 @qobuz_app.command("doctor")
 def qobuz_doctor(executable: str | None = typer.Option(None, "--executable")) -> None:
-    """Check whether the separately cloned qobuz-dl executable is available."""
+    """Check whether the separately installed qobuz-dl executable is available."""
     resolved = _qobuz_executable(executable)
     provider = QobuzDLProvider(QobuzDLConfig(executable=resolved))
     if not provider.is_available():
@@ -213,12 +251,26 @@ def qobuz_download_url(
         typer.echo(str(path))
 
 
+@streamrip_app.command("doctor")
+def streamrip_doctor(executable: str | None = typer.Option(None, "--executable")) -> None:
+    """Check whether the external streamrip executable is available."""
+    resolved = _streamrip_executable(executable)
+    provider = StreamripProvider(StreamripConfig(executable=resolved))
+    if not provider.is_available():
+        typer.echo(f"streamrip not found: {resolved}", err=True)
+        typer.echo(f"Install or clone: {STREAMRIP_REPOSITORY}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"streamrip available: {resolved}")
+
+
 @app.command()
 def acquire(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show resolved tracks waiting for download."),
     limit: int | None = typer.Option(None, "--limit", min=1),
-    quality: int = typer.Option(27, "--quality", "-q"),
-    qobuz_dl: str | None = typer.Option(None, "--qobuz-dl", help="Path to the qobuz-dl executable from the external clone."),
+    downloader: str = typer.Option("qobuz-dl", "--downloader", help="External downloader: qobuz-dl or streamrip."),
+    quality: int | None = typer.Option(None, "--quality", "-q", help="Downloader-specific quality. qobuz-dl defaults to 27; streamrip defaults to 4."),
+    qobuz_dl: str | None = typer.Option(None, "--qobuz-dl", help="Path to the qobuz-dl executable."),
+    streamrip: str | None = typer.Option(None, "--streamrip", help="Path to the streamrip `rip` executable."),
 ) -> None:
     """Download already-resolved Qobuz tracks into the canonical local library."""
     settings = _settings_with_database()
@@ -228,20 +280,35 @@ def acquire(
         if dry_run or not tasks:
             return
 
-        provider = QobuzDLProvider(_qobuz_config(qobuz_dl, quality, managed=True))
+        provider = _acquisition_provider(downloader, quality, qobuz_dl, streamrip)
         try:
             provider.require_available()
-        except QobuzDLUnavailableError as exc:
+        except (QobuzDLUnavailableError, StreamripUnavailableError) as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=2) from exc
 
         report = acquire_tasks(connection, provider, tasks, settings.library_dir)
 
-    typer.echo(f"Acquired: {report.succeeded}")
-    typer.echo(f"Failed:   {report.failed}")
+    typer.echo(f"Downloader: {downloader}")
+    typer.echo(f"Acquired:   {report.succeeded}")
+    typer.echo(f"Failed:     {report.failed}")
     for failure in report.failures:
         typer.echo(f"  {failure.spotify_id}: {failure.message}", err=True)
     if report.failed:
+        raise typer.Exit(code=2)
+
+
+@playlists_app.command("build")
+def playlists_build(
+    allow_partial: bool = typer.Option(False, "--allow-partial", help="Write playlists with acquired tracks even when some tracks are missing."),
+) -> None:
+    """Build UTF-8 M3U8 playlists from persisted Spotify order and local FLAC paths."""
+    settings = _settings_with_database()
+    with connect(settings.database_path) as connection:
+        report = build_playlists(connection, settings.playlists_dir, allow_partial=allow_partial)
+    typer.echo(format_build_report(report))
+    typer.echo(f"Playlist directory: {settings.playlists_dir}")
+    if report.incomplete and not allow_partial:
         raise typer.Exit(code=2)
 
 
