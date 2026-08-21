@@ -1,15 +1,48 @@
 from __future__ import annotations
 
 import os
+
 import typer
 
 from .auto_resolution import auto_resolve_tracks, format_auto_resolution_report
-from .cli import app, resolve_app
+from .cli import _acquisition_provider, app, resolve_app
 from .config import Settings
 from .db import connect, initialize
 from .gc import clean_unreferenced_tracks, format_cleanup_report
 from .providers.streamrip import StreamripUnavailableError
 from .providers.streamrip_search import StreamripCatalogSearch, StreamripSearchConfig
+from .spotify.auth import SpotifyAuth, SpotifyAuthError, SpotifyOAuthConfig
+from .spotify.client import SpotifyAPIError, SpotifyClient
+from .spotify.ingest import SpotifySnapshot, fetch_spotify_snapshot
+from .workflow import (
+    format_update_workflow_report,
+    preview_update_workflow,
+    run_update_workflow,
+)
+
+
+def _fetch_update_snapshot(settings: Settings) -> SpotifySnapshot:
+    config = SpotifyOAuthConfig.load(settings.spotify_config_path)
+    auth = SpotifyAuth(config)
+    with SpotifyClient(auth) as client:
+        return fetch_spotify_snapshot(client)
+
+
+def _update_acquisition_provider(
+    source: str,
+    qobuz_dl: str | None,
+    streamrip: str | None,
+):
+    try:
+        return _acquisition_provider(
+            source,
+            None,
+            None,
+            qobuz_dl,
+            streamrip,
+        )
+    except typer.BadParameter as exc:
+        raise ValueError(str(exc)) from exc
 
 
 @resolve_app.command("auto")
@@ -75,6 +108,114 @@ def resolve_auto_command(
 
     typer.echo(format_auto_resolution_report(report))
     if report.failed:
+        raise typer.Exit(code=2)
+
+
+@app.command("update")
+def coordinated_update_command(
+    source: str = typer.Option(
+        "qobuz",
+        "--source",
+        help="Catalog used to automatically resolve currently unresolved tracks.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview post-pull resolution/download work without changing local state or files.",
+    ),
+    search_results: int = typer.Option(
+        10,
+        "--search-results",
+        min=1,
+        help="Maximum catalog candidates requested for each automatic search query.",
+    ),
+    resolution_limit: int | None = typer.Option(
+        None,
+        "--resolution-limit",
+        min=1,
+        help="Maximum number of unresolved desired tracks to search in this run.",
+    ),
+    allow_partial: bool = typer.Option(
+        False,
+        "--allow-partial",
+        help="Allow generated playlists to omit tracks that remain unavailable locally.",
+    ),
+    qobuz_dl: str | None = typer.Option(
+        None,
+        "--qobuz-dl",
+        help="Path to the external qobuz-dl executable used for Qobuz acquisitions.",
+    ),
+    streamrip: str | None = typer.Option(
+        None,
+        "--streamrip",
+        help="Path to the Streamrip `rip` executable used for catalog search and non-Qobuz acquisition.",
+    ),
+) -> None:
+    """Refresh Spotify, resolve desired tracks, acquire audio, and rebuild playlists."""
+    normalized_source = source.strip().lower()
+    streamrip_executable = streamrip or os.getenv("SYNCTIFY_STREAMRIP", "rip")
+    search_provider = StreamripCatalogSearch(
+        StreamripSearchConfig(
+            executable=streamrip_executable,
+            results_per_query=search_results,
+        )
+    )
+    if not search_provider.supports(normalized_source):
+        supported = ", ".join(sorted(search_provider.supported_sources))
+        raise typer.BadParameter(f"source must be one of: {supported}")
+
+    settings = Settings.default()
+    settings.ensure_directories()
+    initialize(settings.database_path)
+
+    try:
+        snapshot = _fetch_update_snapshot(settings)
+    except (SpotifyAuthError, SpotifyAPIError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    provider_factory = lambda task_source: _update_acquisition_provider(
+        task_source,
+        qobuz_dl,
+        streamrip,
+    )
+
+    try:
+        with connect(settings.database_path) as connection:
+            if dry_run:
+                report = preview_update_workflow(
+                    connection,
+                    snapshot,
+                    search_provider,
+                    normalized_source,
+                    provider_factory,
+                    search_results=search_results,
+                    resolution_limit=resolution_limit,
+                )
+            else:
+                report = run_update_workflow(
+                    connection,
+                    snapshot,
+                    search_provider,
+                    normalized_source,
+                    provider_factory,
+                    settings.library_dir,
+                    settings.playlists_dir,
+                    search_results=search_results,
+                    resolution_limit=resolution_limit,
+                    allow_partial=allow_partial,
+                )
+    except (OSError, RuntimeError, ValueError) as exc:
+        typer.echo(f"Update failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(format_update_workflow_report(report))
+    if not dry_run and report.playlists is not None and report.playlists.incomplete:
+        typer.echo(
+            "Some playlists remain incomplete. Resolve/acquire the missing tracks or use --allow-partial.",
+            err=True,
+        )
+    if report.operational_failures:
         raise typer.Exit(code=2)
 
 
