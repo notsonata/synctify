@@ -74,9 +74,20 @@ def pending_resolution_tracks(
     connection: sqlite3.Connection,
     *,
     limit: int | None = None,
+    spotify_ids: Sequence[str] | None = None,
 ) -> tuple[Track, ...]:
+    params: list[object] = []
+    selected_clause = ""
+    if spotify_ids is not None:
+        selected = tuple(dict.fromkeys(spotify_ids))
+        if not selected:
+            return ()
+        placeholders = ", ".join("?" for _ in selected)
+        selected_clause = f" AND t.spotify_id IN ({placeholders})"
+        params.extend(selected)
+
     rows = connection.execute(
-        """
+        f"""
         SELECT t.spotify_id, t.title, t.artist, t.album, t.isrc, t.duration_ms, t.local_path
         FROM tracks AS t
         WHERE NOT EXISTS (
@@ -89,8 +100,10 @@ def pending_resolution_tracks(
               FROM playlist_tracks AS pt
               WHERE pt.track_id = t.spotify_id
           )
+          {selected_clause}
         ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.title COLLATE NOCASE
-        """
+        """,
+        params,
     ).fetchall()
     tracks = tuple(
         Track(
@@ -115,6 +128,7 @@ def auto_resolve_tracks(
     limit: int | None = None,
     search_results: int = 10,
     dry_run: bool = False,
+    spotify_ids: Sequence[str] | None = None,
 ) -> AutoResolutionReport:
     normalized_source = source.strip().lower()
     if not search_provider.supports(normalized_source):
@@ -126,7 +140,11 @@ def auto_resolve_tracks(
         raise ValueError("search_results must be at least 1")
 
     attempts: list[AutoResolutionAttempt] = []
-    for track in pending_resolution_tracks(connection, limit=limit):
+    for track in pending_resolution_tracks(
+        connection,
+        limit=limit,
+        spotify_ids=spotify_ids,
+    ):
         try:
             candidates = tuple(
                 search_provider.search(
