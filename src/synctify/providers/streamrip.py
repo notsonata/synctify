@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Callable, Sequence
+import tempfile
+from typing import Callable
 
-from ..models import Track
 from ..resolution import Candidate
 from .base import AcquiredTrack
 
 STREAMRIP_REPOSITORY = "https://github.com/nathom/streamrip"
+STREAMRIP_SOURCES = frozenset({"qobuz", "tidal", "deezer", "soundcloud"})
 
 
 class StreamripUnavailableError(RuntimeError):
@@ -32,13 +34,17 @@ class StreamripConfig:
 
 
 class StreamripProvider:
-    """Out-of-process Qobuz acquisition adapter for streamrip."""
+    """Out-of-process Streamrip downloader for supported source services."""
 
-    name = "qobuz"
+    name = "streamrip"
+    supported_sources = STREAMRIP_SOURCES
 
     def __init__(self, config: StreamripConfig | None = None, *, runner: Runner = subprocess.run) -> None:
         self.config = config or StreamripConfig()
         self._runner = runner
+
+    def supports(self, source: str) -> bool:
+        return source.strip().lower() in self.supported_sources
 
     def is_available(self) -> bool:
         return shutil.which(self.config.executable) is not None
@@ -49,13 +55,7 @@ class StreamripProvider:
                 f"{self.config.executable!r} was not found on PATH. Install streamrip first: {STREAMRIP_REPOSITORY}"
             )
 
-    def search(self, track: Track) -> Sequence[Candidate]:
-        """Search remains outside Synctify until a stable machine-readable contract is required."""
-        return ()
-
-    def build_download_command(self, qobuz_url: str, destination: Path) -> list[str]:
-        if not qobuz_url.startswith(("https://www.qobuz.com/", "https://open.qobuz.com/")):
-            raise ValueError("Expected a Qobuz track or album URL")
+    def build_download_command(self, source_file: Path, destination: Path) -> list[str]:
         if self.config.quality not in {0, 1, 2, 3, 4}:
             raise ValueError("Streamrip quality must be between 0 and 4")
         return [
@@ -67,35 +67,65 @@ class StreamripProvider:
             str(self.config.quality),
             "--no-progress",
             *self.config.extra_args,
-            "url",
-            qobuz_url,
+            "file",
+            str(source_file),
         ]
 
-    def acquire_url(self, qobuz_url: str, destination: Path) -> tuple[Path, ...]:
+    def acquire(self, candidate: Candidate, destination: Path) -> AcquiredTrack:
+        source = candidate.provider.strip().lower()
+        if not self.supports(source):
+            supported = ", ".join(sorted(self.supported_sources))
+            raise ValueError(
+                f"streamrip source {candidate.provider!r} is unsupported; choose one of: {supported}"
+            )
+
         self.require_available()
         destination.mkdir(parents=True, exist_ok=True)
         before = {path.resolve() for path in destination.rglob("*.flac")}
-        result = self._runner(
-            self.build_download_command(qobuz_url, destination),
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+
+        source_file: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                suffix=".json",
+                prefix="synctify-streamrip-",
+                delete=False,
+            ) as handle:
+                json.dump(
+                    [
+                        {
+                            "source": source,
+                            "media_type": "track",
+                            "id": candidate.provider_track_id,
+                        }
+                    ],
+                    handle,
+                )
+                source_file = Path(handle.name)
+
+            result = self._runner(
+                self.build_download_command(source_file, destination),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        finally:
+            if source_file is not None:
+                source_file.unlink(missing_ok=True)
+
         if result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip() or "streamrip failed"
             raise StreamripDownloadError(message)
-        after = {path.resolve() for path in destination.rglob("*.flac")}
-        return tuple(sorted(after - before))
 
-    def acquire(self, candidate: Candidate, destination: Path) -> AcquiredTrack:
-        qobuz_url = f"https://open.qobuz.com/track/{candidate.provider_track_id}"
-        files = self.acquire_url(qobuz_url, destination)
+        after = {path.resolve() for path in destination.rglob("*.flac")}
+        files = tuple(sorted(after - before))
         if len(files) != 1:
             raise StreamripDownloadError(
-                f"Expected one new FLAC for track {candidate.provider_track_id}, found {len(files)}"
+                f"Expected one new FLAC for {source} track {candidate.provider_track_id}, found {len(files)}"
             )
         return AcquiredTrack(
-            provider=self.name,
+            provider=source,
             provider_track_id=candidate.provider_track_id,
             path=files[0],
         )

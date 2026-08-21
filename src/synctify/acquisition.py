@@ -70,7 +70,7 @@ def pending_acquisitions(
     provider_clause = ""
     if provider is not None:
         provider_clause = " AND r.provider = ?"
-        params.append(provider)
+        params.append(provider.strip().lower())
 
     rows = connection.execute(
         f"""
@@ -152,11 +152,11 @@ def acquire_tasks(
     failures: list[AcquisitionFailure] = []
 
     for task in tasks:
-        if task.provider != provider.name:
+        if not provider.supports(task.provider):
             failures.append(
                 AcquisitionFailure(
                     task.spotify_id,
-                    f"task provider {task.provider!r} does not match {provider.name!r}",
+                    f"downloader {provider.name!r} does not support source {task.provider!r}",
                 )
             )
             continue
@@ -164,9 +164,9 @@ def acquire_tasks(
         try:
             acquired = provider.acquire(task.candidate(), destination)
             if acquired.provider != task.provider:
-                raise ValueError("provider returned an unexpected provider name")
+                raise ValueError("downloader returned an unexpected source provider")
             if acquired.provider_track_id != task.provider_track_id:
-                raise ValueError("provider returned an unexpected track ID")
+                raise ValueError("downloader returned an unexpected track ID")
 
             path = acquired.path.expanduser().resolve()
             if not path.is_file():

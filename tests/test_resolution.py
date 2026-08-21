@@ -179,14 +179,19 @@ def test_v2_database_migrates_to_resolution_schema(tmp_path: Path) -> None:
 
 def test_acquisition_provider_protocol_is_runtime_checkable(tmp_path: Path) -> None:
     class FakeProvider:
-        name = "fake"
+        name = "fake-downloader"
+        supported_sources = frozenset({"fake"})
+
+        def supports(self, source: str) -> bool:
+            return source in self.supported_sources
 
         def search(self, track: Track) -> list[Candidate]:
             return [Candidate("fake", "1", track.title, track.artist)]
 
         def acquire(self, candidate: Candidate, destination: Path) -> AcquiredTrack:
-            return AcquiredTrack("fake", candidate.provider_track_id, destination / "track.flac")
+            return AcquiredTrack(candidate.provider, candidate.provider_track_id, destination / "track.flac")
 
     provider = FakeProvider()
     assert isinstance(provider, AcquisitionProvider)
+    assert provider.supports("fake") is True
     assert provider.acquire(provider.search(source_track())[0], tmp_path).path.name == "track.flac"
