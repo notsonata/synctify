@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "synctify"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local-first Spotify playlist and lossless music library synchronizer"
 readme = "README.md"
 requires-python = ">=3.12"
