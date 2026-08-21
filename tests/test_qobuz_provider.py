@@ -15,9 +15,9 @@ from synctify.providers.qobuz import (
 from synctify.resolution import Candidate
 
 
-def candidate() -> Candidate:
+def candidate(provider: str = "qobuz") -> Candidate:
     return Candidate(
-        provider="qobuz",
+        provider=provider,
         provider_track_id="123456789",
         title="Track",
         artist="Artist",
@@ -28,7 +28,11 @@ def candidate() -> Candidate:
 
 
 def test_qobuz_provider_conforms_to_protocol() -> None:
-    assert isinstance(QobuzDLProvider(), AcquisitionProvider)
+    provider = QobuzDLProvider()
+    assert isinstance(provider, AcquisitionProvider)
+    assert provider.name == "qobuz-dl"
+    assert provider.supports("qobuz") is True
+    assert provider.supports("tidal") is False
 
 
 def test_build_download_command_uses_quality_and_destination(tmp_path: Path) -> None:
@@ -56,6 +60,13 @@ def test_build_download_command_rejects_non_qobuz_url(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         provider.build_download_command("https://example.com/track/1", tmp_path)
+
+
+def test_qobuz_dl_rejects_non_qobuz_resolution(tmp_path: Path) -> None:
+    provider = QobuzDLProvider()
+
+    with pytest.raises(ValueError, match="only supports Qobuz"):
+        provider.acquire(candidate("tidal"), tmp_path)
 
 
 def test_acquire_detects_new_flac(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
