@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -95,6 +95,12 @@ CREATE TABLE IF NOT EXISTS playlist_backup_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_playlist_backup_snapshots_latest
 ON playlist_backup_snapshots(target_id, playlist_file, id);
+
+CREATE TABLE IF NOT EXISTS generated_playlists (
+    playlist_id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL UNIQUE,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -152,6 +158,12 @@ def _migrate(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_playlist_backup_snapshots_latest
         ON playlist_backup_snapshots(target_id, playlist_file, id);
+
+        CREATE TABLE IF NOT EXISTS generated_playlists (
+            playlist_id TEXT PRIMARY KEY,
+            filename TEXT NOT NULL UNIQUE,
+            updated_at TEXT NOT NULL
+        );
         """
     )
 
