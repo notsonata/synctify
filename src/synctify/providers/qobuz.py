@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Callable, Sequence
+from typing import Callable
 
-from ..models import Track
 from ..resolution import Candidate
 from .base import AcquiredTrack
 
@@ -34,11 +33,15 @@ class QobuzDLConfig:
 class QobuzDLProvider:
     """Invoke a separately cloned/installed Sei969/qobuz-dl executable."""
 
-    name = "qobuz"
+    name = "qobuz-dl"
+    supported_sources = frozenset({"qobuz"})
 
     def __init__(self, config: QobuzDLConfig | None = None, *, runner: Runner = subprocess.run) -> None:
         self.config = config or QobuzDLConfig()
         self._runner = runner
+
+    def supports(self, source: str) -> bool:
+        return source.strip().lower() in self.supported_sources
 
     def is_available(self) -> bool:
         return shutil.which(self.config.executable) is not None
@@ -49,10 +52,6 @@ class QobuzDLProvider:
                 f"{self.config.executable!r} was not found. Clone {QOBUZ_DL_REPOSITORY}, "
                 "complete its upstream setup, then put qobuz-dl on PATH or pass its executable path."
             )
-
-    def search(self, track: Track) -> Sequence[Candidate]:
-        """Synctify does not depend on qobuz-dl internals or scrape its interactive output."""
-        return ()
 
     def build_download_command(self, qobuz_url: str, destination: Path) -> list[str]:
         if not qobuz_url.startswith(("https://www.qobuz.com/", "https://open.qobuz.com/")):
@@ -85,6 +84,10 @@ class QobuzDLProvider:
         return tuple(sorted(after - before))
 
     def acquire(self, candidate: Candidate, destination: Path) -> AcquiredTrack:
+        if not self.supports(candidate.provider):
+            raise ValueError(
+                f"qobuz-dl only supports Qobuz resolutions, not {candidate.provider!r}"
+            )
         qobuz_url = f"https://open.qobuz.com/track/{candidate.provider_track_id}"
         files = self.acquire_url(qobuz_url, destination)
         if len(files) != 1:
@@ -92,7 +95,7 @@ class QobuzDLProvider:
                 f"Expected one new FLAC for track {candidate.provider_track_id}, found {len(files)}"
             )
         return AcquiredTrack(
-            provider=self.name,
+            provider=candidate.provider,
             provider_track_id=candidate.provider_track_id,
             path=files[0],
         )
