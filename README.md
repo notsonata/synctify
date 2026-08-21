@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.10.0**
+**Current version: 0.11.0**
 
 Synctify is a local-first macOS music library manager. Spotify provides desired playlist/library state, Synctify keeps one canonical local lossless library, generates UTF-8 M3U8 playlists, mirrors that library to devices, and can maintain a non-destructive cloud backup.
 
@@ -40,6 +40,8 @@ Synctify currently includes:
 - OAuth refresh tokens stored in the system keychain
 - Liked Songs and accessible playlist ingestion
 - Spotify IDs, ISRCs, metadata, ordering, and change planning
+- coordinated `update` workflow for Spotify refresh, resolution, acquisition, and playlist rebuild
+- transactional `update --dry-run` simulation with no persistent DB or filesystem changes
 - deterministic source-service track resolution
 - automatic catalog lookup through external Streamrip
 - Qobuz, Tidal, Deezer, and SoundCloud automatic metadata matching
@@ -87,15 +89,71 @@ playlist-read-collaborative
 
 Spotify's current API only exposes playlist items when the authenticated user owns the playlist or is a collaborator. Followed playlists owned by somebody else are therefore not imported into Synctify's desired state.
 
-## Import Spotify state
+## Coordinated update workflow
+
+The normal update path coordinates the major stages in order:
+
+```text
+Spotify pull
+   ↓
+automatic source resolution
+   ↓
+acquire every currently resolved desired track
+   ↓
+rebuild M3U8 playlists
+```
+
+Preview the complete post-pull state without persisting anything:
 
 ```bash
-synctify spotify pull
 synctify update --dry-run
+```
+
+The dry run fetches Spotify, applies the new desired state inside a SQLite savepoint, simulates automatic resolutions, calculates the resulting download plan, checks current playlist readiness, then rolls the savepoint back. It does not download audio and does not write M3U8 files.
+
+Run the full workflow:
+
+```bash
 synctify update
 ```
 
-`update` refreshes desired Spotify state. Resolution and acquisition remain explicit separate steps.
+Qobuz is the default catalog used for automatic resolution:
+
+```bash
+synctify update --source qobuz
+```
+
+You can choose another Streamrip-supported catalog for the automatic-resolution stage:
+
+```bash
+synctify update --source tidal
+synctify update --source deezer
+synctify update --source soundcloud
+```
+
+The selected `--source` controls only which catalog is searched for tracks that do not yet have a stored resolution. The acquisition stage then processes all pending desired tracks that already have resolutions, regardless of source. Qobuz resolutions use qobuz-dl by default, while Tidal, Deezer, and SoundCloud resolutions use Streamrip.
+
+Useful update controls:
+
+```bash
+synctify update --search-results 10
+synctify update --resolution-limit 25
+synctify update --allow-partial
+synctify update --qobuz-dl /path/to/qobuz-dl/.venv/bin/qobuz-dl
+synctify update --streamrip /opt/homebrew/bin/rip
+```
+
+Successful stages are committed as the workflow progresses. If one download fails, Synctify preserves earlier successful Spotify/resolution/download work, continues reporting the remaining state, and still attempts to rebuild playlists from the files that are safely available.
+
+All lower-level commands remain available when you want manual control over a particular stage.
+
+## Import Spotify state only
+
+To refresh Spotify desired state without running acquisition or playlist rebuilding, use:
+
+```bash
+synctify spotify pull
+```
 
 ## Track resolution
 
@@ -450,6 +508,7 @@ synctify spotify logout
 synctify spotify pull
 synctify update
 synctify update --dry-run
+synctify update --source <source>
 synctify resolve status
 synctify resolve auto --source <source>
 synctify resolve auto --source <source> --dry-run
