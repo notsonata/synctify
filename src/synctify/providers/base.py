@@ -14,6 +14,7 @@ class AcquiredTrack:
     provider: str
     provider_track_id: str
     path: Path
+    reconciled: bool = False
 
 
 @runtime_checkable
