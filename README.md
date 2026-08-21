@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.14.0**
+**Current version: 0.15.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -43,6 +43,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 - library audit/repair for missing files, hash drift, and untracked FLAC reconciliation
 - UTF-8 M3U8 generation
 - strict and opt-in partial playlist generation
+- generated-playlist ownership and stale-output cleanup
 - mounted-filesystem mirrors through rclone
 - non-destructive rclone cloud backups with playlist snapshots
 - safe local garbage collection
@@ -253,6 +254,25 @@ synctify playlists build --allow-partial
 ```
 
 Strict mode skips an incomplete playlist. Partial mode writes only currently available tracks.
+
+Generated M3U8 files now have explicit ownership state in SQLite schema v5 and include a marker immediately after `#EXTM3U`:
+
+```text
+#EXTM3U
+#SYNCTIFY:playlist-id=<spotify-playlist-id>
+```
+
+Ownership lets Synctify safely maintain the generated playlist directory:
+
+- if a previously complete playlist becomes incomplete under strict mode, its previously generated owned M3U8 is removed
+- if a Spotify playlist is removed, its owned generated M3U8 is removed on the next playlist build/update
+- if a playlist is renamed or its duplicate-name disambiguation changes, the previous owned filename is removed after the replacement is written
+- unknown `.m3u8` files are never deleted merely because their names resemble a Spotify playlist
+- if the normal generated filename is occupied by an unmarked user file, Synctify preserves it and chooses a deterministic `[synctify-…]` filename instead
+- if a file recorded as owned no longer carries the matching ownership marker, Synctify treats it as protected and relinquishes ownership rather than deleting it
+- existing pre-v0.15 Synctify outputs are adopted only when their full legacy content exactly matches the playlist Synctify is about to render
+
+This prevents stale generated playlists from propagating to device mirrors or the cloud `playlists/current/` view while avoiding deletion of unrelated user-maintained playlists.
 
 ## Filesystem mirrors
 
