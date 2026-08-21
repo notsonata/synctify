@@ -63,7 +63,12 @@ def _check_directory(name: str, path: Path) -> DoctorCheck:
     if not path.is_dir():
         return DoctorCheck("paths", name, CheckStatus.FAIL, f"not a directory: {path}")
     if not os.access(path, os.R_OK | os.W_OK | os.X_OK):
-        return DoctorCheck("paths", name, CheckStatus.FAIL, f"directory is not readable/writable: {path}")
+        return DoctorCheck(
+            "paths",
+            name,
+            CheckStatus.FAIL,
+            f"directory is not readable/writable: {path}",
+        )
     return DoctorCheck("paths", name, CheckStatus.PASS, str(path))
 
 
@@ -94,6 +99,8 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
         return checks, ()
 
     targets: tuple[SyncTarget, ...] = ()
+    schema_is_older = False
+    schema_is_current = False
     try:
         integrity_rows = connection.execute("PRAGMA integrity_check").fetchall()
         integrity = [str(row[0]) for row in integrity_rows]
@@ -114,11 +121,17 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
         ).fetchone()
         if row is None:
             checks.append(
-                DoctorCheck("database", "schema", CheckStatus.FAIL, "schema_version metadata is missing")
+                DoctorCheck(
+                    "database",
+                    "schema",
+                    CheckStatus.FAIL,
+                    "schema_version metadata is missing",
+                )
             )
         else:
             actual = str(row["value"])
             if actual == SCHEMA_VERSION:
+                schema_is_current = True
                 checks.append(
                     DoctorCheck(
                         "database",
@@ -134,6 +147,7 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
                 except ValueError:
                     actual_number = expected_number = -1
                 if 0 <= actual_number < expected_number:
+                    schema_is_older = True
                     status = CheckStatus.WARN
                     message = (
                         f"version {actual}; current is {SCHEMA_VERSION}. "
@@ -148,7 +162,7 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
         tables = {str(row["name"]) for row in table_rows}
-        required = {
+        core_required = {
             "metadata",
             "tracks",
             "playlists",
@@ -158,18 +172,38 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
             "sync_runs",
             "playlist_backup_snapshots",
         }
-        missing = sorted(required - tables)
-        if missing:
+        missing_core = sorted(core_required - tables)
+        if missing_core:
             checks.append(
                 DoctorCheck(
                     "database",
                     "tables",
                     CheckStatus.FAIL,
-                    f"missing required table(s): {', '.join(missing)}",
+                    f"missing required table(s): {', '.join(missing_core)}",
                 )
             )
+        elif "generated_playlists" not in tables:
+            if schema_is_older:
+                checks.append(
+                    DoctorCheck(
+                        "database",
+                        "tables",
+                        CheckStatus.WARN,
+                        "generated_playlists migration is pending; run `synctify init`",
+                    )
+                )
+            else:
+                checks.append(
+                    DoctorCheck(
+                        "database",
+                        "tables",
+                        CheckStatus.FAIL,
+                        "current schema is missing generated_playlists",
+                    )
+                )
         else:
-            checks.append(DoctorCheck("database", "tables", CheckStatus.PASS, "core tables present"))
+            message = "schema v5 tables present" if schema_is_current else "core tables present"
+            checks.append(DoctorCheck("database", "tables", CheckStatus.PASS, message))
 
         if "sync_targets" in tables:
             rows = connection.execute(
@@ -254,11 +288,17 @@ def _check_spotify(
             )
         )
     else:
-        checks.append(DoctorCheck("spotify", "keychain", CheckStatus.PASS, "stored token present"))
+        checks.append(
+            DoctorCheck("spotify", "keychain", CheckStatus.PASS, "stored token present")
+        )
     return checks
 
 
-def _check_executable(name: str, executable: str, which: Which) -> tuple[DoctorCheck, str | None]:
+def _check_executable(
+    name: str,
+    executable: str,
+    which: Which,
+) -> tuple[DoctorCheck, str | None]:
     resolved = which(executable)
     if resolved is None:
         return (
@@ -273,7 +313,10 @@ def _check_executable(name: str, executable: str, which: Which) -> tuple[DoctorC
     return DoctorCheck("tools", name, CheckStatus.PASS, resolved), resolved
 
 
-def _list_rclone_remotes(executable: str, runner: Runner) -> tuple[set[str] | None, DoctorCheck]:
+def _list_rclone_remotes(
+    executable: str,
+    runner: Runner,
+) -> tuple[set[str] | None, DoctorCheck]:
     try:
         result = runner(
             [executable, "listremotes"],
