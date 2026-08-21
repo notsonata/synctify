@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.8.0**
+**Current version: 0.9.0**
 
 Synctify is a local-first macOS music library manager. Spotify provides desired playlist/library state, Synctify keeps one canonical local lossless library, generates UTF-8 M3U8 playlists, mirrors that library to devices, and can maintain a non-destructive cloud backup.
 
@@ -52,9 +52,10 @@ Synctify currently includes:
 - deletion propagation for device mirrors
 - non-destructive rclone cloud backups
 - timestamped playlist backup history
+- safe local garbage collection for tracks with zero current playlist references
 - macOS GitHub Actions tests
 
-Automatic non-Qobuz search/resolution adapters and garbage collection remain future stages.
+Automatic non-Qobuz search/resolution adapters remain a future stage.
 
 ## Spotify setup
 
@@ -346,6 +347,35 @@ Backup semantics are intentionally different from device mirroring:
 
 This keeps the audio backup non-destructive while preserving a clear current playlist view and historical playlist states.
 
+## Local garbage collection
+
+A local FLAC becomes collectible only after its track has zero references in the current playlist state, including the synthetic Liked Songs playlist. Removing a song from one playlist does not make it collectible while another playlist still references it.
+
+Preview cleanup first:
+
+```bash
+synctify clean
+```
+
+`clean` is preview-only by default. To actually remove the safe candidates shown by the preview:
+
+```bash
+synctify clean --apply
+```
+
+Safety behavior:
+
+- only tracks with zero current `playlist_tracks` references are considered
+- files resolving outside Synctify's canonical `library/` are never deleted
+- symlinks escaping the canonical library are never deleted
+- a `local_path` shared by multiple track records is protected
+- missing local files can have their stale local-path/hash state cleared during `--apply`
+- source-service resolutions remain in SQLite after cleanup, so deleted tracks can be acquired again later
+- empty artist/album directories are removed after their final file is deleted
+- cleanup does not touch pCloud or other backup remotes; previously backed-up audio remains there
+
+After cleanup, a later device mirror will propagate those local deletions to the device because mirror targets use `rclone sync`.
+
 ## Sync semantics
 
 Synctify treats device synchronization and cloud backup as different operations:
@@ -402,10 +432,6 @@ synctify sync <target>
 synctify sync <target> --dry-run
 synctify backup <target>
 synctify backup <target> --dry-run
-```
-
-Planned:
-
-```text
-synctify clean --dry-run
+synctify clean
+synctify clean --apply
 ```
