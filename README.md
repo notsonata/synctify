@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.17.0**
+**Current version: 0.18.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -30,6 +30,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 ## Current capabilities
 
 - Python 3.12+ CLI
+- first-run interactive and scripted setup through `synctify setup`
 - SQLite state database with migrations
 - top-level read-only setup diagnostics through `synctify doctor`
 - persistent defaults for source priority, downloader quality, and executable paths
@@ -57,10 +58,68 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-synctify init
+synctify setup
 ```
 
 Set `SYNCTIFY_HOME` to override the default application-data directory.
+
+## First-run setup
+
+Run the interactive wizard:
+
+```bash
+synctify setup
+```
+
+The wizard can:
+
+- initialize the Synctify home, canonical library, playlist directory, and SQLite schema
+- save source priority
+- save qobuz-dl, Streamrip, and rclone executable paths
+- save qobuz-dl and source-specific Streamrip quality defaults
+- save a Spotify Client ID and loopback redirect URI
+- optionally open Spotify browser OAuth and store the token in the system keychain
+- optionally create one filesystem mirror target
+- optionally create one rclone backup target
+- report whether the configured external executables are currently discoverable
+
+Setup does not install qobuz-dl, Streamrip, or rclone. Missing tools are reported as warnings so setup can still finish. Except when `--spotify-login` is explicitly requested, setup does not contact Spotify or any music source service.
+
+The setup command is safe to rerun. Existing mirror/backup targets with exactly the same settings are kept. A conflicting target with the same name is never silently replaced.
+
+For scripted provisioning, use `--non-interactive`:
+
+```bash
+synctify setup --non-interactive \
+  --sources qobuz,tidal,deezer,soundcloud \
+  --spotify-client-id YOUR_SPOTIFY_CLIENT_ID \
+  --qobuz-dl /path/to/qobuz-dl \
+  --streamrip /opt/homebrew/bin/rip \
+  --rclone /opt/homebrew/bin/rclone \
+  --qobuz-quality 27 \
+  --streamrip-qobuz-quality 4 \
+  --streamrip-tidal-quality 3 \
+  --streamrip-deezer-quality 2 \
+  --streamrip-soundcloud-quality 2
+```
+
+Optional target provisioning:
+
+```bash
+synctify setup --non-interactive \
+  --mirror-name phone \
+  --mirror-destination /Volumes/Phone/Music \
+  --backup-name cloud \
+  --backup-destination pcloud:Synctify
+```
+
+Add `--spotify-login` when you explicitly want setup to launch browser OAuth after saving the Spotify configuration.
+
+After setup:
+
+```bash
+synctify doctor
+```
 
 ## Persistent configuration
 
