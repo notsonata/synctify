@@ -2,7 +2,7 @@
 
 **Current version: 0.13.0**
 
-Synctify is a local-first macOS music library manager. Spotify defines desired playlist and library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
+Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
 ## Architecture
 
@@ -25,18 +25,14 @@ M3U8 playlists
    └── backup → pCloud / other rclone remote
 ```
 
-Synctify uses Spotify for metadata and playlist state only. It does not download audio from Spotify.
-
-Source-service identity and downloader choice are separate concepts. A track can resolve to Tidal while Streamrip performs the transfer, or resolve to Qobuz while qobuz-dl performs the transfer.
+Synctify uses Spotify for metadata and playlist state only. It does not download audio from Spotify. Source-service identity and downloader choice are separate concepts.
 
 ## Current capabilities
 
 - Python 3.12+ CLI
 - SQLite state database with migrations
-- Spotify Authorization Code with PKCE
-- OAuth refresh tokens stored in the system keychain
+- Spotify PKCE authentication with refresh tokens in the system keychain
 - Liked Songs and owned/collaborative playlist ingestion
-- Spotify IDs, ISRCs, metadata, ordering, and diff planning
 - deterministic source matching with ambiguity protection
 - automatic Qobuz → Tidal → Deezer → SoundCloud fallback
 - manual source overrides
@@ -47,36 +43,24 @@ Source-service identity and downloader choice are separate concepts. A track can
 - UTF-8 M3U8 generation
 - strict and opt-in partial playlist generation
 - mounted-filesystem mirrors through rclone
-- deletion propagation for mirror targets
-- non-destructive rclone cloud backups
-- timestamped playlist backup history
+- non-destructive rclone cloud backups with playlist snapshots
 - safe local garbage collection
 - macOS GitHub Actions tests
 
 ## Installation
 
-Create a virtual environment and install Synctify:
-
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-```
-
-Synctify uses Mutagen to inspect FLAC tags during acquisition reconciliation.
-
-Set `SYNCTIFY_HOME` if you want to override the default application-data directory.
-
-Initialize local state:
-
-```bash
 synctify init
-synctify status
 ```
+
+Set `SYNCTIFY_HOME` to override the default application-data directory.
 
 ## Spotify setup
 
-Create a Spotify developer application and add this redirect URI:
+Create a Spotify developer application and add:
 
 ```text
 http://127.0.0.1:8765/callback
@@ -96,35 +80,21 @@ playlist-read-private
 playlist-read-collaborative
 ```
 
-Spotify currently exposes playlist items to Synctify only for playlists the authenticated user owns or collaborates on. Followed non-collaborative playlists owned by somebody else are not imported.
-
-To refresh Spotify state only:
+Refresh Spotify state only:
 
 ```bash
 synctify spotify pull
 ```
 
-## Coordinated update workflow
+## Coordinated update
 
-The normal update path coordinates the major stages:
-
-```text
-Spotify pull
-   ↓
-automatic source resolution
-   ↓
-acquire every resolved desired track
-   ↓
-rebuild M3U8 playlists
-```
-
-Preview the complete post-pull state without persisting DB changes or writing files:
+Preview the full post-pull workflow without persistent DB or filesystem changes:
 
 ```bash
 synctify update --dry-run
 ```
 
-Run the full workflow:
+Run it:
 
 ```bash
 synctify update
@@ -138,7 +108,7 @@ Qobuz → Tidal → Deezer → SoundCloud
 
 Fallback is per track. Once a track receives a safe match, later sources are not searched for that track.
 
-Customize source priority:
+Customize priority:
 
 ```bash
 synctify update --sources qobuz,tidal
@@ -149,12 +119,9 @@ Use one source only:
 
 ```bash
 synctify update --source qobuz
-synctify update --source tidal
 ```
 
-`--source` overrides `--sources`.
-
-Other controls:
+Useful controls:
 
 ```bash
 synctify update --search-results 10
@@ -164,282 +131,134 @@ synctify update --qobuz-dl /path/to/qobuz-dl
 synctify update --streamrip /opt/homebrew/bin/rip
 ```
 
-`--resolution-limit` applies to one frozen set of distinct tracks for the whole fallback chain, not a fresh set per service.
-
-A dry run simulates Spotify changes and safe resolutions inside a SQLite savepoint so downstream planning sees the realistic post-resolution state. It then rolls the savepoint back and performs no downloads or playlist writes.
+`--resolution-limit` applies to one frozen set of distinct tracks across the whole fallback chain.
 
 ## Track resolution
 
-Synctify resolves a Spotify track in this order:
+Resolution order:
 
 1. stored manual override
-2. exact normalized ISRC when a candidate exposes an ISRC
+2. exact normalized ISRC when available
 3. normalized title, artist, album, and duration scoring
 4. unresolved or ambiguous when confidence is insufficient
 
-Automatic metadata matches require a score of at least `0.88`. If the top two candidates are within `0.04`, Synctify refuses to choose either candidate automatically.
-
-Inspect state:
+Automatic metadata matches require at least `0.88`. If the top two candidates are within `0.04`, Synctify refuses to choose automatically.
 
 ```bash
 synctify resolve status
-```
-
-Run one catalog search explicitly:
-
-```bash
 synctify resolve auto --source qobuz --dry-run
 synctify resolve auto --source qobuz
-synctify resolve auto --source tidal
-synctify resolve auto --source deezer
-synctify resolve auto --source soundcloud
-```
-
-Persist a manual mapping:
-
-```bash
 synctify resolve set SPOTIFY_TRACK_ID qobuz QOBUZ_TRACK_ID
-synctify resolve set SPOTIFY_TRACK_ID tidal TIDAL_TRACK_ID
-```
-
-Clear a stored mapping:
-
-```bash
 synctify resolve clear SPOTIFY_TRACK_ID
 ```
 
 ## External downloaders
 
-Synctify does not vendor downloader internals. qobuz-dl and Streamrip remain separately installed applications and are invoked out of process.
+Synctify does not vendor downloader internals. Both downloaders remain separate applications invoked out of process.
 
 ### qobuz-dl
 
-Qobuz uses [Sei969/qobuz-dl](https://github.com/Sei969/qobuz-dl) by default.
-
-A separate clone is expected:
+Qobuz defaults to [Sei969/qobuz-dl](https://github.com/Sei969/qobuz-dl).
 
 ```bash
 git clone https://github.com/Sei969/qobuz-dl.git
-```
-
-Complete its upstream setup, including Qobuz authentication, then put `qobuz-dl` on `PATH`, pass `--qobuz-dl`, or configure `SYNCTIFY_QOBUZ_DL`.
-
-Check availability:
-
-```bash
 synctify qobuz doctor
 ```
 
+Complete qobuz-dl's upstream authentication/setup separately. Put the executable on `PATH`, pass `--qobuz-dl`, or use `SYNCTIFY_QOBUZ_DL`.
+
 ### Streamrip
 
-[nathom/streamrip](https://github.com/nathom/streamrip) provides catalog search plus Qobuz, Tidal, Deezer, and SoundCloud download support.
-
-On macOS:
+[nathom/streamrip](https://github.com/nathom/streamrip) is used for catalog search and for Tidal, Deezer, SoundCloud, and optional Qobuz acquisition.
 
 ```bash
 brew install streamrip
-```
-
-Synctify expects `rip` on `PATH`, through `--streamrip`, or through `SYNCTIFY_STREAMRIP`.
-
-Check availability:
-
-```bash
 synctify streamrip doctor
 ```
 
-## Acquisition
+Put `rip` on `PATH`, pass `--streamrip`, or use `SYNCTIFY_STREAMRIP`.
 
-Preview resolved tracks waiting for download:
+## Acquisition
 
 ```bash
 synctify acquire --dry-run
-```
-
-Qobuz defaults to qobuz-dl:
-
-```bash
-synctify acquire
 synctify acquire --source qobuz
-```
-
-Use Streamrip explicitly for Qobuz:
-
-```bash
-synctify acquire --source qobuz --downloader streamrip
-```
-
-Other supported services use Streamrip by default:
-
-```bash
 synctify acquire --source tidal
 synctify acquire --source deezer
 synctify acquire --source soundcloud
 ```
 
-### Acquisition reconciliation and resume
+Qobuz uses qobuz-dl by default. The other source services use Streamrip by default. Qobuz can explicitly use Streamrip with `--downloader streamrip`.
 
-External downloaders can decide that a requested track is already present and therefore create no new FLAC. Synctify no longer treats that case as an automatic failure.
+### Resume and reconciliation
 
-When a downloader successfully creates no new FLAC, or explicitly reports a common "already exists" condition, Synctify scans the canonical library and reads existing FLAC tags with Mutagen. It builds local candidates from title, artist, album, ISRC, and duration, then runs the same deterministic matcher used for source resolution.
+A downloader may skip a requested track because a FLAC already exists, even when Synctify has not recorded that file yet. Synctify can now reconcile that state instead of requiring every acquisition to create exactly one new file.
 
-Synctify adopts an existing file only when that matcher produces one safe unique result. The adopted file is then hashed and persisted to SQLite exactly like a fresh download.
+When a downloader creates no new FLAC, or reports a recognized "already exists" condition, Synctify scans the canonical library and reads FLAC STREAMINFO plus Vorbis comments with a small read-only parser implemented in Synctify itself. No new metadata-library dependency is required.
+
+The existing deterministic matcher then compares title, artist, album, ISRC, and duration. Synctify adopts the file only when there is one safe unique match.
 
 Safety rules:
 
-- reconciliation only considers FLAC files inside the configured canonical library
-- untagged or unreadable FLACs are ignored
+- only FLAC files inside the canonical library are considered
+- unreadable or untagged files are ignored
 - exact ISRC is preferred when available
-- metadata matches still use the normal `0.88` threshold and `0.04` ambiguity margin
-- duplicate equally good files remain ambiguous and are not adopted
-- unrelated downloader failures such as authentication errors are still surfaced
+- metadata matching retains the `0.88` threshold and `0.04` ambiguity margin
+- duplicate equally good files remain ambiguous
+- unrelated downloader failures, such as authentication failures, still surface normally
 - a single-track acquisition that unexpectedly creates multiple new FLACs is still rejected
 
-This keeps resume behavior conservative while avoiding repeated failures when qobuz-dl or Streamrip skips a file that Synctify has not yet recorded.
+A reconciled file is hashed and persisted to SQLite exactly like a fresh download. Acquisition reports distinguish downloaded and reconciled results internally.
 
 ## Playlist generation
 
-Build playlists:
-
 ```bash
 synctify playlists build
-```
-
-Strict mode writes no playlist when any referenced track is unavailable. To intentionally write partial playlists:
-
-```bash
 synctify playlists build --allow-partial
 ```
 
-M3U8 entries use relative UTF-8 paths into the canonical library. Duplicate Spotify playlist names receive distinct filenames.
+Strict mode skips an incomplete playlist. Partial mode writes only currently available tracks.
 
 ## Filesystem mirrors
 
-Add a mounted phone, SD card, USB drive, or external SSD:
-
 ```bash
 synctify targets add phone /Volumes/Phone/Music
-```
-
-Preview destructive mirror behavior first:
-
-```bash
 synctify sync phone --dry-run
-```
-
-Run the mirror:
-
-```bash
 synctify sync phone
 ```
 
-Destination layout:
+Mirror targets use `rclone sync`, so destination-only files under managed `library/` and `playlists/` roots are removed. Missing/unmounted destinations and unsafe overlapping paths are refused.
 
-```text
-/Volumes/Phone/Music/
-├── library/
-└── playlists/
-```
+## Cloud backup
 
-Mirror targets use `rclone sync`, so destination-only files under managed `library/` and `playlists/` roots are removed. Synctify refuses missing/unmounted destinations and paths that overlap its own application-data directory.
-
-## pCloud and rclone backups
-
-Configure pCloud or another rclone backend first:
-
-```bash
-rclone config
-```
-
-Add a backup target:
+Configure pCloud or another rclone backend, then:
 
 ```bash
 synctify targets add-backup cloud pcloud:Synctify
-```
-
-Preview and run:
-
-```bash
 synctify backup cloud --dry-run
 synctify backup cloud
 ```
 
-Remote layout:
+Backup semantics:
 
-```text
-pcloud:Synctify/
-├── library/
-└── playlists/
-    ├── current/
-    └── snapshots/
-```
-
-Backup semantics differ from mirror semantics:
-
-- `library/` uses `rclone copy`, so local FLAC deletion does not delete the remote copy
-- `playlists/current/` mirrors the current generated playlist set
-- `playlists/snapshots/` is append-only history
+- `library/` uses `rclone copy`, so local deletion does not remove the remote audio copy
+- `playlists/current/` mirrors the latest generated set
+- `playlists/snapshots/` keeps append-only history
 - unchanged playlists do not create duplicate snapshots
-- dry runs do not alter remote data or snapshot history
 
 ## Local garbage collection
 
-Preview safe cleanup:
-
 ```bash
 synctify clean
-```
-
-Apply it:
-
-```bash
 synctify clean --apply
 ```
 
-A local track becomes collectible only when it has zero references in current playlist state, including Liked Songs.
-
-Cleanup safety includes protection against paths outside the canonical library, symlink escapes, and shared local paths. Source-service resolutions remain stored so a track can be reacquired if it later returns to desired Spotify state.
-
-## Commands
-
-```text
-synctify init
-synctify status
-synctify spotify login
-synctify spotify logout
-synctify spotify pull
-synctify update
-synctify update --dry-run
-synctify update --sources qobuz,tidal,deezer,soundcloud
-synctify update --source <source>
-synctify resolve status
-synctify resolve auto --source <source>
-synctify resolve set <spotify-id> <source> <source-track-id>
-synctify resolve clear <spotify-id>
-synctify qobuz doctor
-synctify qobuz download-url <url> -d <destination>
-synctify streamrip doctor
-synctify acquire --source <source>
-synctify acquire --dry-run
-synctify playlists build
-synctify playlists build --allow-partial
-synctify targets add <name> <destination>
-synctify targets add-backup <name> <remote:path>
-synctify targets list
-synctify targets remove <name>
-synctify sync <target>
-synctify sync <target> --dry-run
-synctify backup <target>
-synctify backup <target> --dry-run
-synctify clean
-synctify clean --apply
-```
+A file becomes collectible only when its track has zero current playlist references. Paths outside the canonical library, symlink escapes, and shared local paths are protected. Source resolutions remain so a track can be reacquired if it returns to desired Spotify state.
 
 ## Development
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
 python -m pytest
 ```
+
+Version consistency tests require `pyproject.toml`, `synctify.__version__`, and the README version above to remain synchronized.
