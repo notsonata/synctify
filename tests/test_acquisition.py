@@ -5,19 +5,19 @@ from pathlib import Path
 
 from synctify.acquisition import acquire_tasks, pending_acquisitions
 from synctify.db import connect, initialize
-from synctify.models import Track
 from synctify.providers.base import AcquiredTrack
 from synctify.resolution import Candidate, set_manual_override
 
 
-class FakeQobuzProvider:
-    name = "qobuz"
+class FakeDownloader:
+    name = "fake-downloader"
+    supported_sources = frozenset({"qobuz", "tidal"})
 
     def __init__(self, *, fail_ids: set[str] | None = None) -> None:
         self.fail_ids = fail_ids or set()
 
-    def search(self, track: Track) -> tuple[Candidate, ...]:
-        return ()
+    def supports(self, source: str) -> bool:
+        return source in self.supported_sources
 
     def acquire(self, candidate: Candidate, destination: Path) -> AcquiredTrack:
         if candidate.provider_track_id in self.fail_ids:
@@ -26,7 +26,7 @@ class FakeQobuzProvider:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(f"FLAC:{candidate.provider_track_id}".encode())
         return AcquiredTrack(
-            provider=self.name,
+            provider=candidate.provider,
             provider_track_id=candidate.provider_track_id,
             path=path,
         )
@@ -61,6 +61,22 @@ def test_pending_acquisitions_only_returns_resolved_missing_tracks(tmp_path: Pat
     assert tasks[0].provider_track_id == "q1"
 
 
+def test_pending_acquisitions_filters_by_source_service(tmp_path: Path) -> None:
+    database = tmp_path / "synctify.sqlite3"
+    initialize(database)
+
+    with connect(database) as connection:
+        _insert_track(connection, "qobuz-track", "Qobuz")
+        _insert_track(connection, "tidal-track", "Tidal")
+        set_manual_override(connection, "qobuz-track", "qobuz", "q1")
+        set_manual_override(connection, "tidal-track", "tidal", "t1")
+
+        tidal_tasks = pending_acquisitions(connection, provider="tidal")
+
+    assert [task.spotify_id for task in tidal_tasks] == ["tidal-track"]
+    assert tidal_tasks[0].provider == "tidal"
+
+
 def test_acquire_tasks_records_local_path_hash_and_qobuz_id(tmp_path: Path) -> None:
     database = tmp_path / "synctify.sqlite3"
     library = tmp_path / "library"
@@ -71,7 +87,7 @@ def test_acquire_tasks_records_local_path_hash_and_qobuz_id(tmp_path: Path) -> N
         set_manual_override(connection, "spotify-1", "qobuz", "123")
         tasks = pending_acquisitions(connection, provider="qobuz")
 
-        report = acquire_tasks(connection, FakeQobuzProvider(), tasks, library)
+        report = acquire_tasks(connection, FakeDownloader(), tasks, library)
         row = connection.execute(
             "SELECT qobuz_id, local_path, sha256, status FROM tracks WHERE spotify_id = 'spotify-1'"
         ).fetchone()
@@ -83,6 +99,43 @@ def test_acquire_tasks_records_local_path_hash_and_qobuz_id(tmp_path: Path) -> N
     assert Path(row["local_path"]).is_file()
     assert row["sha256"] == hashlib.sha256(expected_bytes).hexdigest()
     assert row["status"] == "local"
+
+
+def test_acquire_tasks_accepts_non_qobuz_source_when_downloader_supports_it(tmp_path: Path) -> None:
+    database = tmp_path / "synctify.sqlite3"
+    library = tmp_path / "library"
+    initialize(database)
+
+    with connect(database) as connection:
+        _insert_track(connection, "spotify-tidal", "Track")
+        set_manual_override(connection, "spotify-tidal", "tidal", "987")
+        tasks = pending_acquisitions(connection, provider="tidal")
+
+        report = acquire_tasks(connection, FakeDownloader(), tasks, library)
+        row = connection.execute(
+            "SELECT qobuz_id, local_path, status FROM tracks WHERE spotify_id = 'spotify-tidal'"
+        ).fetchone()
+
+    assert report.succeeded == 1
+    assert row["qobuz_id"] is None
+    assert Path(row["local_path"]).is_file()
+    assert row["status"] == "local"
+
+
+def test_acquire_tasks_rejects_source_the_downloader_does_not_support(tmp_path: Path) -> None:
+    database = tmp_path / "synctify.sqlite3"
+    initialize(database)
+
+    with connect(database) as connection:
+        _insert_track(connection, "spotify-deezer", "Track")
+        set_manual_override(connection, "spotify-deezer", "deezer", "321")
+        tasks = pending_acquisitions(connection, provider="deezer")
+
+        report = acquire_tasks(connection, FakeDownloader(), tasks, tmp_path / "library")
+
+    assert report.succeeded == 0
+    assert report.failed == 1
+    assert "does not support source 'deezer'" in report.failures[0].message
 
 
 def test_acquire_tasks_continues_after_provider_failure(tmp_path: Path) -> None:
@@ -98,7 +151,7 @@ def test_acquire_tasks_continues_after_provider_failure(tmp_path: Path) -> None:
 
         report = acquire_tasks(
             connection,
-            FakeQobuzProvider(fail_ids={"bad"}),
+            FakeDownloader(fail_ids={"bad"}),
             tasks,
             tmp_path / "library",
         )
