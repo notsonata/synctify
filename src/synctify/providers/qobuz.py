@@ -6,7 +6,9 @@ import shutil
 import subprocess
 from typing import Callable, Sequence
 
-from .base import AcquiredTrack, Candidate, SourceTrack
+from ..models import Track
+from ..resolution import Candidate
+from .base import AcquiredTrack
 
 
 class QobuzDLUnavailableError(RuntimeError):
@@ -28,11 +30,7 @@ class QobuzDLConfig:
 
 
 class QobuzDLProvider:
-    """Subprocess adapter for Sei969/qobuz-dl.
-
-    Search integration will be added separately. This adapter acquires a
-    previously resolved Qobuz URL and keeps the GPL application out-of-process.
-    """
+    """Out-of-process adapter for Sei969/qobuz-dl."""
 
     name = "qobuz"
 
@@ -49,8 +47,8 @@ class QobuzDLProvider:
                 f"{self.config.executable!r} was not found on PATH. Install qobuz-dl-ultimate first."
             )
 
-    def search(self, track: SourceTrack) -> Sequence[Candidate]:
-        """Search is intentionally unavailable until a stable machine-readable API is wired."""
+    def search(self, track: Track) -> Sequence[Candidate]:
+        """Search remains disabled until qobuz-dl exposes stable machine-readable output."""
         return ()
 
     def build_download_command(self, qobuz_url: str, destination: Path) -> list[str]:
@@ -71,8 +69,12 @@ class QobuzDLProvider:
         self.require_available()
         destination.mkdir(parents=True, exist_ok=True)
         before = {path.resolve() for path in destination.rglob("*.flac")}
-        command = self.build_download_command(qobuz_url, destination)
-        result = self._runner(command, text=True, capture_output=True, check=False)
+        result = self._runner(
+            self.build_download_command(qobuz_url, destination),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
         if result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip() or "qobuz-dl failed"
             raise QobuzDLDownloadError(message)
@@ -80,12 +82,14 @@ class QobuzDLProvider:
         return tuple(sorted(after - before))
 
     def acquire(self, candidate: Candidate, destination: Path) -> AcquiredTrack:
-        url = candidate.extra.get("url") if candidate.extra else None
-        if not isinstance(url, str):
-            raise ValueError("Qobuz candidate requires an extra['url'] value")
-        files = self.acquire_url(url, destination)
+        qobuz_url = f"https://open.qobuz.com/track/{candidate.provider_track_id}"
+        files = self.acquire_url(qobuz_url, destination)
         if len(files) != 1:
             raise QobuzDLDownloadError(
                 f"Expected one new FLAC for track {candidate.provider_track_id}, found {len(files)}"
             )
-        return AcquiredTrack(candidate=candidate, path=files[0])
+        return AcquiredTrack(
+            provider=self.name,
+            provider_track_id=candidate.provider_track_id,
+            path=files[0],
+        )
