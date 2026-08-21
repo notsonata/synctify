@@ -6,6 +6,7 @@ import typer
 
 from .config import Settings
 from .db import connect, initialize
+from .resolution import clear_resolution, set_manual_override
 from .spotify.auth import DEFAULT_REDIRECT_URI, KeyringTokenStore, SpotifyAuth, SpotifyAuthError, SpotifyOAuthConfig, interactive_login, resolve_config
 from .spotify.client import SpotifyAPIError, SpotifyClient
 from .spotify.ingest import fetch_spotify_snapshot
@@ -13,7 +14,9 @@ from .spotify.state import ChangePlan, apply_snapshot, format_plan, plan_snapsho
 
 app = typer.Typer(name="synctify", help="Local-first Spotify playlist and lossless music library synchronizer.", no_args_is_help=True)
 spotify_app = typer.Typer(help="Authenticate with Spotify and import desired library state.")
+resolve_app = typer.Typer(help="Inspect and manage provider track resolutions.")
 app.add_typer(spotify_app, name="spotify")
+app.add_typer(resolve_app, name="resolve")
 
 
 def _settings_with_database() -> Settings:
@@ -56,6 +59,7 @@ def status() -> None:
             local_tracks = connection.execute("SELECT COUNT(*) FROM tracks WHERE local_path IS NOT NULL").fetchone()[0]
             unresolved = connection.execute("SELECT COUNT(*) FROM tracks WHERE status = 'unresolved'").fetchone()[0]
             playlists = connection.execute("SELECT COUNT(*) FROM playlists").fetchone()[0]
+            resolutions = connection.execute("SELECT COUNT(*) FROM track_resolutions").fetchone()[0]
             last_pull = connection.execute("SELECT value FROM metadata WHERE key = 'spotify_last_pull_at'").fetchone()
     except sqlite3.DatabaseError as exc:
         typer.echo(f"Database error: {exc}", err=True)
@@ -64,6 +68,7 @@ def status() -> None:
     typer.echo(f"  Tracks:      {tracks}")
     typer.echo(f"  Local FLACs: {local_tracks}")
     typer.echo(f"  Unresolved:  {unresolved}")
+    typer.echo(f"  Resolutions: {resolutions}")
     typer.echo(f"  Playlists:   {playlists}")
     typer.echo(f"  Spotify:     {last_pull[0] if last_pull else 'never pulled'}")
     typer.echo(f"  Library:     {settings.library_dir}")
@@ -106,6 +111,46 @@ def spotify_pull() -> None:
         raise typer.Exit(code=2) from exc
     typer.echo(format_plan(plan))
     typer.echo("Spotify desired state updated.")
+
+
+@resolve_app.command("status")
+def resolve_status() -> None:
+    """Show how many Spotify tracks have provider resolutions."""
+    settings = _settings_with_database()
+    with connect(settings.database_path) as connection:
+        total = connection.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+        resolved = connection.execute("SELECT COUNT(*) FROM track_resolutions").fetchone()[0]
+        manual = connection.execute("SELECT COUNT(*) FROM track_resolutions WHERE is_manual = 1").fetchone()[0]
+    typer.echo("Track resolution")
+    typer.echo(f"  Tracks:     {total}")
+    typer.echo(f"  Resolved:   {resolved}")
+    typer.echo(f"  Manual:     {manual}")
+    typer.echo(f"  Unresolved: {max(total - resolved, 0)}")
+
+
+@resolve_app.command("set")
+def resolve_set(spotify_id: str, provider: str, provider_track_id: str) -> None:
+    """Persist a manual provider mapping for one Spotify track."""
+    settings = _settings_with_database()
+    try:
+        with connect(settings.database_path) as connection:
+            set_manual_override(connection, spotify_id, provider, provider_track_id)
+    except KeyError as exc:
+        typer.echo(f"Unknown Spotify track: {spotify_id}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Mapped {spotify_id} -> {provider}:{provider_track_id}")
+
+
+@resolve_app.command("clear")
+def resolve_clear(spotify_id: str) -> None:
+    """Remove an automatic or manual provider mapping."""
+    settings = _settings_with_database()
+    with connect(settings.database_path) as connection:
+        removed = clear_resolution(connection, spotify_id)
+    if not removed:
+        typer.echo(f"No resolution stored for {spotify_id}")
+        raise typer.Exit(code=1)
+    typer.echo(f"Cleared resolution for {spotify_id}")
 
 
 @app.command()
