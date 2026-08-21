@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 import sqlite3
-from typing import Callable
+from typing import Callable, Sequence
 
 from .acquisition import AcquisitionReport, AcquisitionTask, acquire_tasks, pending_acquisitions
 from .auto_resolution import (
@@ -11,6 +11,7 @@ from .auto_resolution import (
     CatalogSearchProvider,
     auto_resolve_tracks,
     format_auto_resolution_report,
+    pending_resolution_tracks,
 )
 from .playlists import (
     PlaylistBuildReport,
@@ -19,11 +20,13 @@ from .playlists import (
     playlists_from_database,
 )
 from .providers.base import AcquisitionProvider
+from .resolution import ResolutionStatus
 from .spotify.ingest import SpotifySnapshot
 from .spotify.state import ChangePlan, apply_snapshot, format_plan, plan_snapshot
 
 
 AcquisitionProviderFactory = Callable[[str], AcquisitionProvider]
+DEFAULT_SOURCE_PRIORITY = ("qobuz", "tidal", "deezer", "soundcloud")
 
 
 @dataclass(slots=True, frozen=True)
@@ -60,15 +63,55 @@ class AcquisitionGroup:
 @dataclass(slots=True, frozen=True)
 class UpdateWorkflowReport:
     spotify: ChangePlan
-    resolution: AutoResolutionReport
+    resolution_sources: tuple[str, ...]
+    resolutions: tuple[AutoResolutionReport, ...]
     acquisitions: tuple[AcquisitionGroup, ...]
     playlist_readiness: PlaylistReadiness | None
     playlists: PlaylistBuildReport | None
     dry_run: bool
 
     @property
+    def resolution(self) -> AutoResolutionReport:
+        """Compatibility view for callers that previously expected one source report."""
+        if self.resolutions:
+            return self.resolutions[0]
+        source = self.resolution_sources[0] if self.resolution_sources else "none"
+        return AutoResolutionReport(source, (), self.dry_run)
+
+    @property
+    def resolution_failures(self) -> int:
+        """Count only search errors that were not recovered by a later source."""
+        failed_ids = {
+            attempt.track.spotify_id
+            for report in self.resolutions
+            for attempt in report.attempts
+            if attempt.error is not None
+        }
+        resolved_ids = {
+            attempt.track.spotify_id
+            for report in self.resolutions
+            for attempt in report.attempts
+            if attempt.resolution is not None
+            and attempt.resolution.status is ResolutionStatus.RESOLVED
+        }
+        return len(failed_ids - resolved_ids)
+
+    @property
     def operational_failures(self) -> int:
-        return self.resolution.failed + sum(group.failed for group in self.acquisitions)
+        return self.resolution_failures + sum(group.failed for group in self.acquisitions)
+
+
+def normalize_source_priority(sources: str | Sequence[str]) -> tuple[str, ...]:
+    if isinstance(sources, str):
+        raw_sources = (sources,)
+    else:
+        raw_sources = tuple(sources)
+    normalized = tuple(
+        dict.fromkeys(source.strip().lower() for source in raw_sources if source.strip())
+    )
+    if not normalized:
+        raise ValueError("at least one automatic-resolution source is required")
+    return normalized
 
 
 def playlist_readiness(connection: sqlite3.Connection) -> PlaylistReadiness:
@@ -90,6 +133,46 @@ def playlist_readiness(connection: sqlite3.Connection) -> PlaylistReadiness:
         incomplete=len(playlists) - complete,
         missing_tracks=missing_tracks,
     )
+
+
+def _run_resolution_priority(
+    connection: sqlite3.Connection,
+    search_provider: CatalogSearchProvider,
+    sources: str | Sequence[str],
+    *,
+    search_results: int,
+    resolution_limit: int | None,
+    preview: bool,
+) -> tuple[tuple[str, ...], tuple[AutoResolutionReport, ...]]:
+    priority = normalize_source_priority(sources)
+    for source in priority:
+        if not search_provider.supports(source):
+            supported = ", ".join(sorted(search_provider.supported_sources))
+            raise ValueError(
+                f"automatic-resolution source {source!r} is unsupported; supported: {supported}"
+            )
+
+    selected_tracks = pending_resolution_tracks(connection, limit=resolution_limit)
+    selected_ids = tuple(track.spotify_id for track in selected_tracks)
+    if not selected_ids:
+        return priority, ()
+
+    reports: list[AutoResolutionReport] = []
+    for source in priority:
+        if not pending_resolution_tracks(connection, spotify_ids=selected_ids):
+            break
+        report = auto_resolve_tracks(
+            connection,
+            search_provider,
+            source,
+            search_results=search_results,
+            dry_run=False,
+            spotify_ids=selected_ids,
+        )
+        if preview:
+            report = replace(report, dry_run=True)
+        reports.append(report)
+    return priority, tuple(reports)
 
 
 def _group_pending_acquisitions(
@@ -151,7 +234,7 @@ def preview_update_workflow(
     connection: sqlite3.Connection,
     snapshot: SpotifySnapshot,
     search_provider: CatalogSearchProvider,
-    resolve_source: str,
+    resolve_sources: str | Sequence[str],
     acquisition_provider_factory: AcquisitionProviderFactory,
     *,
     search_results: int = 10,
@@ -162,15 +245,14 @@ def preview_update_workflow(
     connection.execute("SAVEPOINT synctify_update_preview")
     try:
         apply_snapshot(connection, snapshot)
-        resolution = auto_resolve_tracks(
+        resolution_sources, resolutions = _run_resolution_priority(
             connection,
             search_provider,
-            resolve_source,
-            limit=resolution_limit,
+            resolve_sources,
             search_results=search_results,
-            dry_run=False,
+            resolution_limit=resolution_limit,
+            preview=True,
         )
-        resolution = replace(resolution, dry_run=True)
         acquisitions = _group_pending_acquisitions(
             connection,
             acquisition_provider_factory,
@@ -182,7 +264,8 @@ def preview_update_workflow(
 
     return UpdateWorkflowReport(
         spotify=spotify_plan,
-        resolution=resolution,
+        resolution_sources=resolution_sources,
+        resolutions=resolutions,
         acquisitions=acquisitions,
         playlist_readiness=readiness,
         playlists=None,
@@ -194,7 +277,7 @@ def run_update_workflow(
     connection: sqlite3.Connection,
     snapshot: SpotifySnapshot,
     search_provider: CatalogSearchProvider,
-    resolve_source: str,
+    resolve_sources: str | Sequence[str],
     acquisition_provider_factory: AcquisitionProviderFactory,
     library_dir: Path,
     playlists_dir: Path,
@@ -203,18 +286,18 @@ def run_update_workflow(
     resolution_limit: int | None = None,
     allow_partial: bool = False,
 ) -> UpdateWorkflowReport:
-    """Apply Spotify state, resolve, acquire, then rebuild playlists."""
+    """Apply Spotify state, resolve with ordered fallback, acquire, then rebuild playlists."""
     spotify_plan = plan_snapshot(connection, snapshot)
     apply_snapshot(connection, snapshot)
     connection.commit()
 
-    resolution = auto_resolve_tracks(
+    resolution_sources, resolutions = _run_resolution_priority(
         connection,
         search_provider,
-        resolve_source,
-        limit=resolution_limit,
+        resolve_sources,
         search_results=search_results,
-        dry_run=False,
+        resolution_limit=resolution_limit,
+        preview=False,
     )
     connection.commit()
 
@@ -236,7 +319,8 @@ def run_update_workflow(
     )
     return UpdateWorkflowReport(
         spotify=spotify_plan,
-        resolution=resolution,
+        resolution_sources=resolution_sources,
+        resolutions=resolutions,
         acquisitions=acquisitions,
         playlist_readiness=None,
         playlists=playlists,
@@ -245,7 +329,15 @@ def run_update_workflow(
 
 
 def format_update_workflow_report(report: UpdateWorkflowReport) -> str:
-    sections = [format_plan(report.spotify), format_auto_resolution_report(report.resolution)]
+    sections = [
+        format_plan(report.spotify),
+        "Automatic resolution priority\n  " + " -> ".join(report.resolution_sources),
+    ]
+
+    if not report.resolutions:
+        sections.append("No unresolved tracks are waiting for automatic resolution.")
+    else:
+        sections.extend(format_auto_resolution_report(item) for item in report.resolutions)
 
     acquisition_lines = ["Acquisition"]
     if not report.acquisitions:
