@@ -27,7 +27,7 @@ def test_initialize_creates_schema(tmp_path: Path) -> None:
         ).fetchone()[0]
 
     assert {"tracks", "playlists", "playlist_tracks", "sync_targets", "sync_runs"} <= tables
-    assert schema_version == "1"
+    assert schema_version == "2"
 
 
 def test_m3u8_uses_relative_utf8_paths(tmp_path: Path) -> None:
@@ -72,3 +72,27 @@ def test_sync_modes_have_different_delete_semantics(tmp_path: Path) -> None:
     assert rclone_command(tmp_path, backup)[1] == "copy"
     assert destination_deletes_enabled(SyncMode.MIRROR) is True
     assert destination_deletes_enabled(SyncMode.BACKUP) is False
+
+
+def test_initialize_migrates_v1_playlist_schema(tmp_path: Path) -> None:
+    database = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE playlists (
+                spotify_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                snapshot_id TEXT,
+                last_checked_at TEXT
+            );
+            """
+        )
+    initialize(database)
+    with sqlite3.connect(database) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(playlists)")}
+        version = connection.execute(
+            "SELECT value FROM metadata WHERE key='schema_version'"
+        ).fetchone()[0]
+    assert {"source_kind", "owner_id", "collaborative"} <= columns
+    assert version == "2"

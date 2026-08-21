@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS playlists (
     spotify_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     snapshot_id TEXT,
-    last_checked_at TEXT
+    last_checked_at TEXT,
+    source_kind TEXT NOT NULL DEFAULT 'playlist',
+    owner_id TEXT,
+    collaborative INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS playlist_tracks (
@@ -71,9 +74,28 @@ def connect(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
+def _migrate(connection: sqlite3.Connection) -> None:
+    playlist_columns = _columns(connection, "playlists")
+    if "source_kind" not in playlist_columns:
+        connection.execute(
+            "ALTER TABLE playlists ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'playlist'"
+        )
+    if "owner_id" not in playlist_columns:
+        connection.execute("ALTER TABLE playlists ADD COLUMN owner_id TEXT")
+    if "collaborative" not in playlist_columns:
+        connection.execute(
+            "ALTER TABLE playlists ADD COLUMN collaborative INTEGER NOT NULL DEFAULT 0"
+        )
+
+
 def initialize(path: Path) -> None:
     with connect(path) as connection:
         connection.executescript(SCHEMA)
+        _migrate(connection)
         connection.execute(
-            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', '1')"
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', '2')"
         )
