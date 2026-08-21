@@ -58,8 +58,15 @@ def playlist_marker(spotify_id: str) -> str:
     return f"#SYNCTIFY:playlist-id={spotify_id}"
 
 
-def render_m3u8(playlist: Playlist, playlist_dir: Path) -> str:
-    lines = ["#EXTM3U", playlist_marker(playlist.spotify_id)]
+def _render_playlist_lines(
+    playlist: Playlist,
+    playlist_dir: Path,
+    *,
+    include_marker: bool,
+) -> list[str]:
+    lines = ["#EXTM3U"]
+    if include_marker:
+        lines.append(playlist_marker(playlist.spotify_id))
     for track in playlist.tracks:
         if track.local_path is None:
             raise MissingLocalTrackError(
@@ -67,12 +74,30 @@ def render_m3u8(playlist: Playlist, playlist_dir: Path) -> str:
             )
         relative = os.path.relpath(track.local_path, start=playlist_dir)
         lines.append(Path(relative).as_posix())
-    return "\n".join(lines) + "\n"
+    return lines
+
+
+def render_m3u8(playlist: Playlist, playlist_dir: Path) -> str:
+    return "\n".join(
+        _render_playlist_lines(playlist, playlist_dir, include_marker=True)
+    ) + "\n"
+
+
+def _render_legacy_m3u8(playlist: Playlist, playlist_dir: Path) -> str:
+    return "\n".join(
+        _render_playlist_lines(playlist, playlist_dir, include_marker=False)
+    ) + "\n"
 
 
 def write_m3u8(playlist: Playlist, playlist_dir: Path, *, filename: str | None = None) -> Path:
     playlist_dir.mkdir(parents=True, exist_ok=True)
-    output = playlist_dir / (filename or f"{safe_playlist_filename(playlist.name)}.m3u8")
+    output_name = filename or f"{safe_playlist_filename(playlist.name)}.m3u8"
+    relative = Path(output_name)
+    if relative.name != output_name or relative.suffix.lower() != ".m3u8":
+        raise ValueError("playlist filename must be one .m3u8 file name")
+    output = playlist_dir / output_name
+    if output.is_symlink():
+        raise ValueError(f"refusing to overwrite playlist symlink: {output}")
     output.write_text(render_m3u8(playlist, playlist_dir), encoding="utf-8", newline="\n")
     return output
 
@@ -156,6 +181,8 @@ def _safe_owned_path(playlist_dir: Path, filename: str) -> Path | None:
         return None
     root = playlist_dir.expanduser().resolve()
     candidate = root / filename
+    if candidate.is_symlink():
+        return None
     try:
         resolved = candidate.resolve(strict=False)
     except OSError:
@@ -175,6 +202,15 @@ def _has_playlist_marker(path: Path, spotify_id: str) -> bool:
     except (OSError, UnicodeError):
         return False
     return first == "#EXTM3U" and second == playlist_marker(spotify_id)
+
+
+def _matches_legacy_output(path: Path, playlist: Playlist, playlist_dir: Path) -> bool:
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        return path.read_text(encoding="utf-8") == _render_legacy_m3u8(playlist, playlist_dir)
+    except (OSError, UnicodeError, MissingLocalTrackError):
+        return False
 
 
 def _remove_owned_file(
@@ -222,10 +258,10 @@ def _fallback_filename(playlist: Playlist, desired: str, occupied: dict[str, str
         candidate = f"{stem} [synctify-{suffix}{extra}].m3u8"
         owner = occupied.get(candidate)
         path = _safe_owned_path(playlist_dir, candidate)
-        if owner not in {None, playlist.spotify_id}:
+        if owner not in {None, playlist.spotify_id} or path is None:
             index += 1
             continue
-        if path is None or not path.exists() or _has_playlist_marker(path, playlist.spotify_id):
+        if not path.exists() or _has_playlist_marker(path, playlist.spotify_id):
             return candidate
         index += 1
 
@@ -238,11 +274,13 @@ def _select_output_filename(
 ) -> str:
     owner = occupied.get(desired)
     path = _safe_owned_path(playlist_dir, desired)
-    if owner not in {None, playlist.spotify_id}:
+    if owner not in {None, playlist.spotify_id} or path is None:
         return _fallback_filename(playlist, desired, occupied, playlist_dir)
-    if path is None or not path.exists():
+    if not path.exists():
         return desired
     if _has_playlist_marker(path, playlist.spotify_id):
+        return desired
+    if owner is None and _matches_legacy_output(path, playlist, playlist_dir):
         return desired
     return _fallback_filename(playlist, desired, occupied, playlist_dir)
 
@@ -288,13 +326,18 @@ def build_playlists(
         should_write = not missing or (allow_partial and available)
 
         if should_write:
-            desired = filenames[playlist.spotify_id]
-            selected = _select_output_filename(playlist, desired, occupied, playlist_dir)
             write_playlist = Playlist(
                 spotify_id=playlist.spotify_id,
                 name=playlist.name,
                 tracks=tuple(available),
                 snapshot_id=playlist.snapshot_id,
+            )
+            desired = filenames[playlist.spotify_id]
+            selected = _select_output_filename(
+                write_playlist,
+                desired,
+                occupied,
+                playlist_dir,
             )
             output = write_m3u8(
                 write_playlist,
