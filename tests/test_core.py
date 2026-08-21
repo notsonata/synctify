@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from synctify.db import initialize
+from synctify.db import SCHEMA_VERSION, initialize
 from synctify.models import Playlist, Track
 from synctify.playlists import MissingLocalTrackError, render_m3u8, safe_playlist_filename
 from synctify.sync import SyncMode, SyncTarget, destination_deletes_enabled, rclone_command
@@ -26,8 +26,15 @@ def test_initialize_creates_schema(tmp_path: Path) -> None:
             "SELECT value FROM metadata WHERE key='schema_version'"
         ).fetchone()[0]
 
-    assert {"tracks", "playlists", "playlist_tracks", "sync_targets", "sync_runs"} <= tables
-    assert schema_version == "2"
+    assert {
+        "tracks",
+        "playlists",
+        "playlist_tracks",
+        "track_resolutions",
+        "sync_targets",
+        "sync_runs",
+    } <= tables
+    assert schema_version == SCHEMA_VERSION
 
 
 def test_m3u8_uses_relative_utf8_paths(tmp_path: Path) -> None:
@@ -80,6 +87,18 @@ def test_initialize_migrates_v1_playlist_schema(tmp_path: Path) -> None:
         connection.executescript(
             """
             CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE tracks (
+                spotify_id TEXT PRIMARY KEY,
+                isrc TEXT,
+                title TEXT NOT NULL,
+                artist TEXT NOT NULL,
+                album TEXT,
+                duration_ms INTEGER,
+                qobuz_id TEXT,
+                local_path TEXT,
+                sha256 TEXT,
+                status TEXT NOT NULL DEFAULT 'unresolved'
+            );
             CREATE TABLE playlists (
                 spotify_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -91,8 +110,15 @@ def test_initialize_migrates_v1_playlist_schema(tmp_path: Path) -> None:
     initialize(database)
     with sqlite3.connect(database) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(playlists)")}
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
         version = connection.execute(
             "SELECT value FROM metadata WHERE key='schema_version'"
         ).fetchone()[0]
     assert {"source_kind", "owner_id", "collaborative"} <= columns
-    assert version == "2"
+    assert "track_resolutions" in tables
+    assert version == SCHEMA_VERSION
