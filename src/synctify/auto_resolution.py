@@ -84,6 +84,11 @@ def pending_resolution_tracks(
             FROM track_resolutions AS r
             WHERE r.spotify_id = t.spotify_id
         )
+          AND EXISTS (
+              SELECT 1
+              FROM playlist_tracks AS pt
+              WHERE pt.track_id = t.spotify_id
+          )
         ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.title COLLATE NOCASE
         """
     ).fetchall()
