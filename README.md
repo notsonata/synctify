@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.9.0**
+**Current version: 0.10.0**
 
 Synctify is a local-first macOS music library manager. Spotify provides desired playlist/library state, Synctify keeps one canonical local lossless library, generates UTF-8 M3U8 playlists, mirrors that library to devices, and can maintain a non-destructive cloud backup.
 
@@ -41,7 +41,9 @@ Synctify currently includes:
 - Liked Songs and accessible playlist ingestion
 - Spotify IDs, ISRCs, metadata, ordering, and change planning
 - deterministic source-service track resolution
-- exact ISRC matching before metadata matching
+- automatic catalog lookup through external Streamrip
+- Qobuz, Tidal, Deezer, and SoundCloud automatic metadata matching
+- exact ISRC matching when candidate metadata provides an ISRC
 - ambiguity protection and persistent manual overrides
 - Qobuz acquisition through external qobuz-dl
 - Qobuz, Tidal, Deezer, and SoundCloud acquisition through external Streamrip
@@ -55,7 +57,7 @@ Synctify currently includes:
 - safe local garbage collection for tracks with zero current playlist references
 - macOS GitHub Actions tests
 
-Automatic non-Qobuz search/resolution adapters remain a future stage.
+Richer source metadata enrichment and additional catalog-search adapters can be added later without changing the downloader boundary.
 
 ## Spotify setup
 
@@ -93,15 +95,15 @@ synctify update --dry-run
 synctify update
 ```
 
-`update` refreshes desired Spotify state. Acquisition remains a separate explicit step.
+`update` refreshes desired Spotify state. Resolution and acquisition remain explicit separate steps.
 
 ## Track resolution
 
 Synctify resolves a Spotify track to a source-service recording in this order:
 
 1. stored manual override
-2. exact normalized ISRC
-3. normalized title, artist, album, and duration scoring
+2. exact normalized ISRC when the source candidate exposes one
+3. normalized title, artist, album, and duration scoring using the metadata available
 4. unresolved or ambiguous when confidence is insufficient
 
 An automatic metadata match requires a score of at least `0.88`. If the top two candidates are within `0.04`, Synctify refuses to auto-select either candidate.
@@ -111,6 +113,42 @@ Inspect resolution counts:
 ```bash
 synctify resolve status
 ```
+
+### Automatic catalog resolution
+
+Synctify can use the separately installed Streamrip CLI as an out-of-process catalog-search adapter. Streamrip supports Qobuz, Tidal, Deezer, and SoundCloud search. qobuz-dl remains the default downloader for resolved Qobuz tracks.
+
+Preview automatic Qobuz matching without saving anything:
+
+```bash
+synctify resolve auto --source qobuz --dry-run
+```
+
+Persist safe matches:
+
+```bash
+synctify resolve auto --source qobuz
+```
+
+The same search path is available for Streamrip's other supported catalogs:
+
+```bash
+synctify resolve auto --source tidal
+synctify resolve auto --source deezer
+synctify resolve auto --source soundcloud
+```
+
+Useful controls:
+
+```bash
+synctify resolve auto --source qobuz --limit 25
+synctify resolve auto --source qobuz --search-results 10
+synctify resolve auto --source qobuz --streamrip /opt/homebrew/bin/rip
+```
+
+For a track with an ISRC, Synctify first asks Streamrip to search that ISRC and also performs a title/artist query. Results are deduplicated before the deterministic matcher runs. Streamrip's JSON search output currently exposes the source ID plus a title/artist description, so Synctify does not pretend that those candidates contain richer metadata such as ISRC, album, or duration when it is not present. This makes automatic matching conservative rather than inventing certainty.
+
+Existing automatic and manual mappings are not overwritten by `resolve auto`. Clear a mapping first if you intentionally want it reconsidered.
 
 Persist manual source mappings:
 
@@ -126,8 +164,6 @@ Remove one:
 ```bash
 synctify resolve clear SPOTIFY_TRACK_ID
 ```
-
-At present, Qobuz is the primary planned automatic resolution source. Non-Qobuz Streamrip sources can already be acquired when a resolution is stored manually.
 
 ## External downloaders
 
@@ -152,9 +188,9 @@ synctify qobuz doctor
 synctify qobuz doctor --executable /path/to/qobuz-dl/.venv/bin/qobuz-dl
 ```
 
-### Streamrip: multi-service downloader
+### Streamrip: multi-service search and download adapter
 
-[nathom/streamrip](https://github.com/nathom/streamrip) supports Qobuz, Tidal, Deezer, and SoundCloud. Synctify primarily uses Streamrip to make those additional source services available while keeping qobuz-dl as the Qobuz-specific default.
+[nathom/streamrip](https://github.com/nathom/streamrip) supports Qobuz, Tidal, Deezer, and SoundCloud. Synctify uses its scriptable catalog search for automatic resolution, and uses Streamrip as the downloader for non-Qobuz sources. qobuz-dl remains the Qobuz-specific download default.
 
 On macOS Streamrip can be installed with Homebrew:
 
@@ -415,6 +451,8 @@ synctify spotify pull
 synctify update
 synctify update --dry-run
 synctify resolve status
+synctify resolve auto --source <source>
+synctify resolve auto --source <source> --dry-run
 synctify resolve set <spotify-id> <source> <source-track-id>
 synctify resolve clear <spotify-id>
 synctify qobuz doctor
