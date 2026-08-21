@@ -7,7 +7,7 @@ import pytest
 
 from synctify.db import SCHEMA_VERSION, initialize
 from synctify.models import Playlist, Track
-from synctify.playlists import MissingLocalTrackError, render_m3u8, safe_playlist_filename
+from synctify.playlists import MissingLocalTrackError, playlist_marker, render_m3u8, safe_playlist_filename
 from synctify.sync import SyncMode, SyncTarget, destination_deletes_enabled, rclone_command
 
 
@@ -34,11 +34,12 @@ def test_initialize_creates_schema(tmp_path: Path) -> None:
         "sync_targets",
         "sync_runs",
         "playlist_backup_snapshots",
+        "generated_playlists",
     } <= tables
     assert schema_version == SCHEMA_VERSION
 
 
-def test_m3u8_uses_relative_utf8_paths(tmp_path: Path) -> None:
+def test_m3u8_uses_relative_utf8_paths_and_ownership_marker(tmp_path: Path) -> None:
     playlist_dir = tmp_path / "Playlists"
     track_path = tmp_path / "Artists" / "宇多田ヒカル" / "First Love" / "01 - Automatic.flac"
     playlist = Playlist(
@@ -57,6 +58,7 @@ def test_m3u8_uses_relative_utf8_paths(tmp_path: Path) -> None:
     content = render_m3u8(playlist, playlist_dir)
 
     assert content.startswith("#EXTM3U\n")
+    assert playlist_marker("playlist-1") in content
     assert "../Artists/宇多田ヒカル/First Love/01 - Automatic.flac" in content
     assert safe_playlist_filename(playlist.name) == "日本語 _ Favorites"
 
@@ -123,4 +125,5 @@ def test_initialize_migrates_v1_playlist_schema(tmp_path: Path) -> None:
     assert {"source_kind", "owner_id", "collaborative"} <= columns
     assert "track_resolutions" in tables
     assert "playlist_backup_snapshots" in tables
+    assert "generated_playlists" in tables
     assert version == SCHEMA_VERSION
