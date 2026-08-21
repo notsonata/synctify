@@ -4,6 +4,7 @@ import os
 
 import typer
 
+from .audit import audit_library, format_audit_report
 from .auto_resolution import auto_resolve_tracks, format_auto_resolution_report
 from .cli import _acquisition_provider, app, resolve_app
 from .config import Settings
@@ -244,6 +245,31 @@ def coordinated_update_command(
             err=True,
         )
     if report.operational_failures:
+        raise typer.Exit(code=2)
+
+
+@app.command("audit")
+def audit_command(
+    repair: bool = typer.Option(
+        False,
+        "--repair",
+        help="Apply only safe database repairs. Without this flag, audit is preview-only.",
+    ),
+) -> None:
+    """Audit canonical FLAC paths/hashes and safely repair local library state."""
+    settings = Settings.default()
+    settings.ensure_directories()
+    initialize(settings.database_path)
+
+    with connect(settings.database_path) as connection:
+        report = audit_library(
+            connection,
+            settings.library_dir,
+            repair=repair,
+        )
+
+    typer.echo(format_audit_report(report))
+    if report.failures:
         raise typer.Exit(code=2)
 
 

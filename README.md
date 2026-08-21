@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.13.0**
+**Current version: 0.14.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -40,6 +40,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 - Qobuz, Tidal, Deezer, and SoundCloud acquisition through external Streamrip
 - resumable acquisition by reconciling existing tagged FLAC files
 - SHA-256 persistence for local files
+- library audit/repair for missing files, hash drift, and untracked FLAC reconciliation
 - UTF-8 M3U8 generation
 - strict and opt-in partial playlist generation
 - mounted-filesystem mirrors through rclone
@@ -192,9 +193,9 @@ Qobuz uses qobuz-dl by default. The other source services use Streamrip by defau
 
 ### Resume and reconciliation
 
-A downloader may skip a requested track because a FLAC already exists, even when Synctify has not recorded that file yet. Synctify can now reconcile that state instead of requiring every acquisition to create exactly one new file.
+A downloader may skip a requested track because a FLAC already exists, even when Synctify has not recorded that file yet. Synctify can reconcile that state instead of requiring every acquisition to create exactly one new file.
 
-When a downloader creates no new FLAC, or reports a recognized "already exists" condition, Synctify scans the canonical library and reads FLAC STREAMINFO plus Vorbis comments with a small read-only parser implemented in Synctify itself. No new metadata-library dependency is required.
+When a downloader creates no new FLAC, or reports a recognized "already exists" condition, Synctify scans the canonical library and reads FLAC STREAMINFO plus Vorbis comments with a small read-only parser implemented in Synctify itself.
 
 The existing deterministic matcher then compares title, artist, album, ISRC, and duration. Synctify adopts the file only when there is one safe unique match.
 
@@ -205,10 +206,44 @@ Safety rules:
 - exact ISRC is preferred when available
 - metadata matching retains the `0.88` threshold and `0.04` ambiguity margin
 - duplicate equally good files remain ambiguous
-- unrelated downloader failures, such as authentication failures, still surface normally
+- unrelated downloader failures still surface normally
 - a single-track acquisition that unexpectedly creates multiple new FLACs is still rejected
 
-A reconciled file is hashed and persisted to SQLite exactly like a fresh download. Acquisition reports distinguish downloaded and reconciled results internally.
+A reconciled file is hashed and persisted to SQLite exactly like a fresh download.
+
+## Library audit and repair
+
+Audit the canonical library without changing anything:
+
+```bash
+synctify audit
+```
+
+Apply only safe database repairs:
+
+```bash
+synctify audit --repair
+```
+
+The audit checks:
+
+- recorded local paths that no longer exist
+- recorded paths outside the canonical library
+- paths that are not regular files
+- missing stored SHA-256 values
+- local files whose current SHA-256 differs from SQLite
+- FLAC files inside the canonical library that are not referenced by any `tracks.local_path`
+
+For desired tracks with no usable recorded local file, Synctify compares untracked FLAC metadata against the Spotify track using the same deterministic matcher used elsewhere. A file is relinked only when the match is safe, unique, and one-to-one. If one untracked file could satisfy multiple tracks, Synctify refuses to assign it automatically.
+
+`--repair` may:
+
+- relink a desired track to one safely matched untracked FLAC
+- calculate and persist the FLAC SHA-256
+- refresh a mismatched/missing stored hash only when the existing file's FLAC metadata still matches that track
+- clear stale local path/hash state for a recorded file that is genuinely missing and has no safe replacement, allowing normal acquisition to resume
+
+`audit --repair` never deletes audio. Unsafe outside-library paths and ambiguous/unreadable files are reported but left unchanged.
 
 ## Playlist generation
 
