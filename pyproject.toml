@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "spotisync"
+name = "synctify"
 version = "0.1.0"
 description = "Local-first Spotify playlist and lossless music library synchronizer"
 readme = "README.md"
@@ -21,10 +21,10 @@ dev = [
 ]
 
 [project.scripts]
-spotisync = "spotisync.cli:app"
+synctify = "synctify.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/spotisync"]
+packages = ["src/synctify"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
