@@ -30,7 +30,14 @@ class FakeSearch:
         return self.candidates
 
 
-def _insert_track(connection, spotify_id: str, *, title: str = "Paranoid Android", artist: str = "Radiohead") -> None:
+def _insert_track(
+    connection,
+    spotify_id: str,
+    *,
+    title: str = "Paranoid Android",
+    artist: str = "Radiohead",
+    referenced: bool = True,
+) -> None:
     connection.execute(
         """
         INSERT INTO tracks(spotify_id, title, artist, album, isrc, duration_ms)
@@ -38,6 +45,17 @@ def _insert_track(connection, spotify_id: str, *, title: str = "Paranoid Android
         """,
         (spotify_id, title, artist),
     )
+    if referenced:
+        connection.execute(
+            "INSERT OR IGNORE INTO playlists(spotify_id, name) VALUES ('desired', 'Desired')"
+        )
+        position = connection.execute(
+            "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = 'desired'"
+        ).fetchone()[0]
+        connection.execute(
+            "INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES ('desired', ?, ?)",
+            (spotify_id, position),
+        )
 
 
 def test_auto_resolution_persists_safe_metadata_match(tmp_path: Path) -> None:
@@ -65,6 +83,21 @@ def test_auto_resolution_persists_safe_metadata_match(tmp_path: Path) -> None:
     assert row["match_method"] == "metadata"
     assert row["confidence"] == 1.0
     assert row["is_manual"] == 0
+
+
+def test_unreferenced_track_is_not_searched(tmp_path: Path) -> None:
+    database = tmp_path / "state.sqlite3"
+    initialize(database)
+    search = FakeSearch(
+        [Candidate("qobuz", "q-123", "Paranoid Android", "Radiohead")]
+    )
+
+    with connect(database) as connection:
+        _insert_track(connection, "spotify-orphan", referenced=False)
+        report = auto_resolve_tracks(connection, search, "qobuz")
+
+    assert report.attempts == ()
+    assert search.calls == []
 
 
 def test_ambiguous_search_results_are_not_persisted(tmp_path: Path) -> None:
