@@ -121,9 +121,10 @@ def test_corrupt_database_is_a_failure(tmp_path: Path) -> None:
     )
 
 
-def test_older_schema_is_warning_not_corruption(tmp_path: Path) -> None:
+def test_older_schema_with_pending_table_is_warning_not_corruption(tmp_path: Path) -> None:
     settings = ready_settings(tmp_path)
     with sqlite3.connect(settings.database_path) as connection:
+        connection.execute("DROP TABLE generated_playlists")
         connection.execute(
             "UPDATE metadata SET value = '4' WHERE key = 'schema_version'"
         )
@@ -140,9 +141,36 @@ def test_older_schema_is_warning_not_corruption(tmp_path: Path) -> None:
         for check in report.checks
         if check.section == "database" and check.name == "schema"
     )
+    tables = next(
+        check
+        for check in report.checks
+        if check.section == "database" and check.name == "tables"
+    )
     assert schema.status is CheckStatus.WARN
+    assert tables.status is CheckStatus.WARN
     assert "synctify init" in schema.message
     assert report.failures == 0
+
+
+def test_current_schema_missing_generated_table_is_failure(tmp_path: Path) -> None:
+    settings = ready_settings(tmp_path)
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.execute("DROP TABLE generated_playlists")
+
+    report = run_doctor(
+        settings,
+        which=fake_which,
+        runner=rclone_runner,
+        token_loader=fake_token,
+    )
+
+    tables = next(
+        check
+        for check in report.checks
+        if check.section == "database" and check.name == "tables"
+    )
+    assert tables.status is CheckStatus.FAIL
+    assert "generated_playlists" in tables.message
 
 
 def test_unsafe_mirror_overlap_is_a_failure(tmp_path: Path) -> None:
@@ -186,7 +214,6 @@ def test_doctor_cli_does_not_initialize_missing_home(
 ) -> None:
     home = tmp_path / "never-created"
     monkeypatch.setenv("SYNCTIFY_HOME", str(home))
-    monkeypatch.setattr("synctify.doctor.shutil.which", lambda _: None)
 
     result = CliRunner().invoke(app, ["doctor"])
 
