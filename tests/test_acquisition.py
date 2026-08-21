@@ -32,7 +32,14 @@ class FakeDownloader:
         )
 
 
-def _insert_track(connection, spotify_id: str, title: str, *, local_path: str | None = None) -> None:
+def _insert_track(
+    connection,
+    spotify_id: str,
+    title: str,
+    *,
+    local_path: str | None = None,
+    referenced: bool = True,
+) -> None:
     connection.execute(
         """
         INSERT INTO tracks(spotify_id, isrc, title, artist, album, duration_ms, local_path)
@@ -40,6 +47,17 @@ def _insert_track(connection, spotify_id: str, title: str, *, local_path: str | 
         """,
         (spotify_id, f"ISRC{spotify_id}", title, local_path),
     )
+    if referenced:
+        connection.execute(
+            "INSERT OR IGNORE INTO playlists(spotify_id, name) VALUES ('desired', 'Desired')"
+        )
+        position = connection.execute(
+            "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = 'desired'"
+        ).fetchone()[0]
+        connection.execute(
+            "INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES ('desired', ?, ?)",
+            (spotify_id, position),
+        )
 
 
 def test_pending_acquisitions_only_returns_resolved_missing_tracks(tmp_path: Path) -> None:
@@ -59,6 +77,21 @@ def test_pending_acquisitions_only_returns_resolved_missing_tracks(tmp_path: Pat
 
     assert [task.spotify_id for task in tasks] == ["missing"]
     assert tasks[0].provider_track_id == "q1"
+
+
+def test_pending_acquisitions_excludes_unreferenced_resolved_track(tmp_path: Path) -> None:
+    database = tmp_path / "synctify.sqlite3"
+    initialize(database)
+
+    with connect(database) as connection:
+        _insert_track(connection, "wanted", "Wanted")
+        _insert_track(connection, "orphan", "Orphan", referenced=False)
+        set_manual_override(connection, "wanted", "qobuz", "q1")
+        set_manual_override(connection, "orphan", "qobuz", "q2")
+
+        tasks = pending_acquisitions(connection, provider="qobuz")
+
+    assert [task.spotify_id for task in tasks] == ["wanted"]
 
 
 def test_pending_acquisitions_filters_by_source_service(tmp_path: Path) -> None:
