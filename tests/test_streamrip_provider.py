@@ -93,6 +93,56 @@ def test_streamrip_acquire_passes_source_and_exact_track_id(
     ]
     assert acquired.provider == source
     assert acquired.provider_track_id == f"{source}-id"
+    assert acquired.reconciled is False
+
+
+def test_streamrip_reconciles_existing_flac_when_no_new_file_is_created(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "synctify.providers.streamrip.shutil.which",
+        lambda _: "/opt/homebrew/bin/rip",
+    )
+    existing = tmp_path / "Artist" / "Album" / "Track.flac"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"existing")
+    monkeypatch.setattr(
+        "synctify.providers.streamrip.find_existing_flac",
+        lambda _candidate, _destination: existing.resolve(),
+    )
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, stdout="nothing new", stderr="")
+
+    acquired = StreamripProvider(runner=runner).acquire(candidate("tidal"), tmp_path)
+
+    assert acquired.path == existing.resolve()
+    assert acquired.reconciled is True
+
+
+def test_streamrip_reconciles_nonzero_existing_file_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "synctify.providers.streamrip.shutil.which",
+        lambda _: "/opt/homebrew/bin/rip",
+    )
+    existing = tmp_path / "Track.flac"
+    existing.write_bytes(b"existing")
+    monkeypatch.setattr(
+        "synctify.providers.streamrip.find_existing_flac",
+        lambda _candidate, _destination: existing.resolve(),
+    )
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 1, stdout="track already downloaded", stderr="")
+
+    acquired = StreamripProvider(runner=runner).acquire(candidate("deezer"), tmp_path)
+
+    assert acquired.path == existing.resolve()
+    assert acquired.reconciled is True
 
 
 def test_streamrip_rejects_unsupported_source(tmp_path: Path) -> None:
@@ -112,6 +162,26 @@ def test_streamrip_surfaces_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         return subprocess.CompletedProcess(command, 1, stdout="", stderr="tidal login failed")
 
     with pytest.raises(StreamripDownloadError, match="tidal login failed"):
+        StreamripProvider(runner=runner).acquire(candidate("tidal"), tmp_path)
+
+
+def test_streamrip_success_without_new_or_reconcilable_file_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "synctify.providers.streamrip.shutil.which",
+        lambda _: "/opt/homebrew/bin/rip",
+    )
+    monkeypatch.setattr(
+        "synctify.providers.streamrip.find_existing_flac",
+        lambda _candidate, _destination: None,
+    )
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, stdout="done", stderr="")
+
+    with pytest.raises(StreamripDownloadError, match="no unique matching existing FLAC"):
         StreamripProvider(runner=runner).acquire(candidate("tidal"), tmp_path)
 
 

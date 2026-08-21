@@ -10,6 +10,7 @@ from typing import Callable
 
 from ..resolution import Candidate
 from .base import AcquiredTrack
+from .reconcile import find_existing_flac, output_reports_existing_file
 
 STREAMRIP_REPOSITORY = "https://github.com/nathom/streamrip"
 STREAMRIP_SOURCES = frozenset({"qobuz", "tidal", "deezer", "soundcloud"})
@@ -71,6 +72,10 @@ class StreamripProvider:
             str(source_file),
         ]
 
+    @staticmethod
+    def _error_message(result: subprocess.CompletedProcess[str]) -> str:
+        return result.stderr.strip() or result.stdout.strip() or "streamrip failed"
+
     def acquire(self, candidate: Candidate, destination: Path) -> AcquiredTrack:
         source = candidate.provider.strip().lower()
         if not self.supports(source):
@@ -114,18 +119,37 @@ class StreamripProvider:
             if source_file is not None:
                 source_file.unlink(missing_ok=True)
 
-        if result.returncode != 0:
-            message = result.stderr.strip() or result.stdout.strip() or "streamrip failed"
-            raise StreamripDownloadError(message)
-
         after = {path.resolve() for path in destination.rglob("*.flac")}
         files = tuple(sorted(after - before))
-        if len(files) != 1:
+
+        if result.returncode == 0 and len(files) == 1:
+            return AcquiredTrack(
+                provider=source,
+                provider_track_id=candidate.provider_track_id,
+                path=files[0],
+            )
+
+        may_be_existing = result.returncode == 0 or output_reports_existing_file(
+            result.stdout,
+            result.stderr,
+        )
+        if not files and may_be_existing:
+            existing = find_existing_flac(candidate, destination)
+            if existing is not None:
+                return AcquiredTrack(
+                    provider=source,
+                    provider_track_id=candidate.provider_track_id,
+                    path=existing,
+                    reconciled=True,
+                )
+
+        if result.returncode != 0:
+            raise StreamripDownloadError(self._error_message(result))
+        if len(files) > 1:
             raise StreamripDownloadError(
                 f"Expected one new FLAC for {source} track {candidate.provider_track_id}, found {len(files)}"
             )
-        return AcquiredTrack(
-            provider=source,
-            provider_track_id=candidate.provider_track_id,
-            path=files[0],
+        raise StreamripDownloadError(
+            f"streamrip created no new FLAC for {source} track {candidate.provider_track_id}, "
+            "and no unique matching existing FLAC could be reconciled"
         )

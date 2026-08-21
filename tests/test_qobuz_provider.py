@@ -84,6 +84,50 @@ def test_acquire_detects_new_flac(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert acquired.provider == "qobuz"
     assert acquired.provider_track_id == "123456789"
     assert acquired.path.name == "01 - Track.flac"
+    assert acquired.reconciled is False
+
+
+def test_acquire_reconciles_existing_flac_when_no_new_file_is_created(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("synctify.providers.qobuz.shutil.which", lambda _: "/usr/local/bin/qobuz-dl")
+    existing = tmp_path / "Artist" / "Album" / "01 - Track.flac"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"existing")
+    monkeypatch.setattr(
+        "synctify.providers.qobuz.find_existing_flac",
+        lambda _candidate, _destination: existing.resolve(),
+    )
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, stdout="already present", stderr="")
+
+    acquired = QobuzDLProvider(runner=runner).acquire(candidate(), tmp_path)
+
+    assert acquired.path == existing.resolve()
+    assert acquired.reconciled is True
+
+
+def test_acquire_reconciles_when_downloader_reports_existing_file_with_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("synctify.providers.qobuz.shutil.which", lambda _: "/usr/local/bin/qobuz-dl")
+    existing = tmp_path / "Track.flac"
+    existing.write_bytes(b"existing")
+    monkeypatch.setattr(
+        "synctify.providers.qobuz.find_existing_flac",
+        lambda _candidate, _destination: existing.resolve(),
+    )
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 1, stdout="File already exists", stderr="")
+
+    acquired = QobuzDLProvider(runner=runner).acquire(candidate(), tmp_path)
+
+    assert acquired.path == existing.resolve()
+    assert acquired.reconciled is True
 
 
 def test_acquire_surfaces_qobuz_dl_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -96,6 +140,23 @@ def test_acquire_surfaces_qobuz_dl_failure(monkeypatch: pytest.MonkeyPatch, tmp_
 
     with pytest.raises(QobuzDLDownloadError, match="authentication failed"):
         provider.acquire(candidate(), tmp_path)
+
+
+def test_success_without_new_or_reconcilable_file_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("synctify.providers.qobuz.shutil.which", lambda _: "/usr/local/bin/qobuz-dl")
+    monkeypatch.setattr(
+        "synctify.providers.qobuz.find_existing_flac",
+        lambda _candidate, _destination: None,
+    )
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, stdout="done", stderr="")
+
+    with pytest.raises(QobuzDLDownloadError, match="no unique matching existing FLAC"):
+        QobuzDLProvider(runner=runner).acquire(candidate(), tmp_path)
 
 
 def test_missing_qobuz_dl_is_reported(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -38,6 +38,7 @@ class AcquiredResult:
     spotify_id: str
     path: Path
     sha256: str
+    reconciled: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -54,6 +55,14 @@ class AcquisitionReport:
     @property
     def succeeded(self) -> int:
         return len(self.completed)
+
+    @property
+    def reconciled(self) -> int:
+        return sum(result.reconciled for result in self.completed)
+
+    @property
+    def downloaded(self) -> int:
+        return self.succeeded - self.reconciled
 
     @property
     def failed(self) -> int:
@@ -179,7 +188,14 @@ def acquire_tasks(
 
             sha256 = file_sha256(path)
             _record_acquired(connection, task, path, sha256)
-            completed.append(AcquiredResult(task.spotify_id, path, sha256))
+            completed.append(
+                AcquiredResult(
+                    task.spotify_id,
+                    path,
+                    sha256,
+                    reconciled=acquired.reconciled,
+                )
+            )
         except (RuntimeError, OSError, ValueError) as exc:
             failures.append(AcquisitionFailure(task.spotify_id, str(exc)))
 
