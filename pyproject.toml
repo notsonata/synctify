@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "synctify"
-version = "0.17.0"
+version = "0.18.0"
 description = "Local-first Spotify playlist and lossless music library synchronizer"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-synctify = "synctify.entrypoint:app"
+synctify = "synctify.setup_cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/synctify"]
