@@ -15,7 +15,9 @@ from .spotify.auth import SpotifyAuth, SpotifyAuthError, SpotifyOAuthConfig
 from .spotify.client import SpotifyAPIError, SpotifyClient
 from .spotify.ingest import SpotifySnapshot, fetch_spotify_snapshot
 from .workflow import (
+    DEFAULT_SOURCE_PRIORITY,
     format_update_workflow_report,
+    normalize_source_priority,
     preview_update_workflow,
     run_update_workflow,
 )
@@ -43,6 +45,26 @@ def _update_acquisition_provider(
         )
     except typer.BadParameter as exc:
         raise ValueError(str(exc)) from exc
+
+
+def _update_source_priority(
+    search_provider: StreamripCatalogSearch,
+    *,
+    source: str | None,
+    sources: str,
+) -> tuple[str, ...]:
+    raw_sources = (source,) if source is not None else tuple(sources.split(","))
+    try:
+        priority = normalize_source_priority(raw_sources)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    unsupported = [item for item in priority if not search_provider.supports(item)]
+    if unsupported:
+        supported = ", ".join(sorted(search_provider.supported_sources))
+        raise typer.BadParameter(
+            f"unsupported source(s): {', '.join(unsupported)}; supported: {supported}"
+        )
+    return priority
 
 
 @resolve_app.command("auto")
@@ -113,10 +135,15 @@ def resolve_auto_command(
 
 @app.command("update")
 def coordinated_update_command(
-    source: str = typer.Option(
-        "qobuz",
+    source: str | None = typer.Option(
+        None,
         "--source",
-        help="Catalog used to automatically resolve currently unresolved tracks.",
+        help="Use only one automatic-resolution catalog, overriding --sources.",
+    ),
+    sources: str = typer.Option(
+        ",".join(DEFAULT_SOURCE_PRIORITY),
+        "--sources",
+        help="Comma-separated automatic-resolution fallback order.",
     ),
     dry_run: bool = typer.Option(
         False,
@@ -133,7 +160,7 @@ def coordinated_update_command(
         None,
         "--resolution-limit",
         min=1,
-        help="Maximum number of unresolved desired tracks to search in this run.",
+        help="Maximum number of distinct unresolved desired tracks to search in this run.",
     ),
     allow_partial: bool = typer.Option(
         False,
@@ -151,8 +178,7 @@ def coordinated_update_command(
         help="Path to the Streamrip `rip` executable used for catalog search and non-Qobuz acquisition.",
     ),
 ) -> None:
-    """Refresh Spotify, resolve desired tracks, acquire audio, and rebuild playlists."""
-    normalized_source = source.strip().lower()
+    """Refresh Spotify, resolve with source fallbacks, acquire audio, and rebuild playlists."""
     streamrip_executable = streamrip or os.getenv("SYNCTIFY_STREAMRIP", "rip")
     search_provider = StreamripCatalogSearch(
         StreamripSearchConfig(
@@ -160,9 +186,11 @@ def coordinated_update_command(
             results_per_query=search_results,
         )
     )
-    if not search_provider.supports(normalized_source):
-        supported = ", ".join(sorted(search_provider.supported_sources))
-        raise typer.BadParameter(f"source must be one of: {supported}")
+    priority = _update_source_priority(
+        search_provider,
+        source=source,
+        sources=sources,
+    )
 
     settings = Settings.default()
     settings.ensure_directories()
@@ -187,7 +215,7 @@ def coordinated_update_command(
                     connection,
                     snapshot,
                     search_provider,
-                    normalized_source,
+                    priority,
                     provider_factory,
                     search_results=search_results,
                     resolution_limit=resolution_limit,
@@ -197,7 +225,7 @@ def coordinated_update_command(
                     connection,
                     snapshot,
                     search_provider,
-                    normalized_source,
+                    priority,
                     provider_factory,
                     settings.library_dir,
                     settings.playlists_dir,
