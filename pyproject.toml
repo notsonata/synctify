@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "synctify"
+version = "0.1.0"
+description = "Local-first Spotify playlist and lossless music library synchronizer"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "notsonata" }]
+dependencies = [
+  "platformdirs>=4.2,<5",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2,<9",
+]
+
+[project.scripts]
+synctify = "synctify.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/synctify"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
