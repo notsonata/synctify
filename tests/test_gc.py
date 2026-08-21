@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from typer.testing import CliRunner
+
+from synctify.cli_entry import app
 from synctify.db import connect, initialize
 from synctify.gc import clean_unreferenced_tracks, collectible_tracks
 from synctify.resolution import set_manual_override
@@ -177,3 +181,31 @@ def test_shared_local_path_is_protected(tmp_path: Path) -> None:
     assert len(report.candidates) == 1
     assert len(report.skipped) == 1
     assert "shared by multiple track records" in (report.skipped[0].reason or "")
+
+
+def test_clean_cli_is_preview_by_default_and_requires_apply(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    library = home / "library"
+    track = library / "Artist" / "Album" / "CLI.flac"
+    track.parent.mkdir(parents=True)
+    track.write_bytes(b"cli")
+    database = home / "synctify.sqlite3"
+    initialize(database)
+    with connect(database) as connection:
+        _insert_track(connection, "spotify-cli", track, title="CLI")
+
+    monkeypatch.setenv("SYNCTIFY_HOME", str(home))
+    runner = CliRunner()
+
+    preview = runner.invoke(app, ["clean"])
+    assert preview.exit_code == 0
+    assert "Preview only" in preview.stdout
+    assert track.exists()
+
+    applied = runner.invoke(app, ["clean", "--apply"])
+    assert applied.exit_code == 0
+    assert "Deleted: 1" in applied.stdout
+    assert not track.exists()
