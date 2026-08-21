@@ -86,6 +86,11 @@ def pending_acquisitions(
         FROM track_resolutions AS r
         JOIN tracks AS t ON t.spotify_id = r.spotify_id
         WHERE (t.local_path IS NULL OR t.local_path = '')
+          AND EXISTS (
+              SELECT 1
+              FROM playlist_tracks AS pt
+              WHERE pt.track_id = t.spotify_id
+          )
         {provider_clause}
         ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.title COLLATE NOCASE
         """,
