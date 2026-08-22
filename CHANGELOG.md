@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.6 - 2026-08-23
+
+Synctify 1.0.6 makes coordinated updates visibly report what they are doing instead of appearing frozen during long Spotify and Streamrip operations.
+
+### Update progress
+
+- print an immediate status line while fetching Spotify desired state
+- report the number of unresolved tracks being searched for each automatic-resolution source
+- report download planning, acquisition groups, playlist readiness checks, and playlist rebuilding
+- send progress messages to stderr while keeping the final structured update report on stdout
+- preserve dry-run rollback behavior so interrupted previews do not persist Spotify or resolution state
+
+No SQLite schema migration is required for this release.
+
 ## 1.0.5 - 2026-08-22
 
 Synctify 1.0.5 adds release-aware self-updating on top of the stable macOS installation layout introduced in 1.0.4.

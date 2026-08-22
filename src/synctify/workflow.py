@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 import sqlite3
+import sys
 from typing import Callable, Sequence
 
 from .acquisition import AcquisitionReport, AcquisitionTask, acquire_tasks, pending_acquisitions
@@ -27,7 +28,17 @@ from .spotify.state import ChangePlan, apply_snapshot, format_plan, plan_snapsho
 
 
 AcquisitionProviderFactory = Callable[[str], AcquisitionProvider]
+ProgressReporter = Callable[[str], None]
 DEFAULT_SOURCE_PRIORITY = ("qobuz", "tidal", "deezer")
+
+
+def _stderr_progress(message: str) -> None:
+    print(f"[update] {message}", file=sys.stderr, flush=True)
+
+
+def _notify(progress: ProgressReporter | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
 
 
 @dataclass(slots=True, frozen=True)
@@ -173,6 +184,7 @@ def _run_resolution_priority(
     search_results: int,
     resolution_limit: int | None,
     preview: bool,
+    progress: ProgressReporter | None = None,
 ) -> tuple[tuple[str, ...], tuple[AutoResolutionReport, ...]]:
     priority = normalize_source_priority(sources)
     for source in priority:
@@ -190,12 +202,15 @@ def _run_resolution_priority(
     selected_tracks = pending_resolution_tracks(connection, limit=resolution_limit)
     selected_ids = tuple(track.spotify_id for track in selected_tracks)
     if not selected_ids:
+        _notify(progress, "No unresolved tracks need automatic resolution.")
         return priority, ()
 
     reports: list[AutoResolutionReport] = []
     for source in priority:
-        if not pending_resolution_tracks(connection, spotify_ids=selected_ids):
+        pending = pending_resolution_tracks(connection, spotify_ids=selected_ids)
+        if not pending:
             break
+        _notify(progress, f"Resolving {len(pending)} track(s) via {source}...")
         report = auto_resolve_tracks(
             connection,
             search_provider,
@@ -248,6 +263,8 @@ def _run_acquisitions(
     groups: tuple[AcquisitionGroup, ...],
     provider_factory: AcquisitionProviderFactory,
     library_dir: Path,
+    *,
+    progress: ProgressReporter | None = None,
 ) -> tuple[AcquisitionGroup, ...]:
     completed: list[AcquisitionGroup] = []
     for group in groups:
@@ -256,6 +273,10 @@ def _run_acquisitions(
             continue
         try:
             provider = provider_factory(group.source)
+            _notify(
+                progress,
+                f"Acquiring {len(group.tasks)} track(s) from {group.source} via {provider.name}...",
+            )
             report = acquire_tasks(connection, provider, group.tasks, library_dir)
             connection.commit()
             completed.append(replace(group, downloader=provider.name, report=report))
@@ -274,8 +295,10 @@ def preview_update_workflow(
     *,
     search_results: int = 10,
     resolution_limit: int | None = None,
+    progress: ProgressReporter | None = _stderr_progress,
 ) -> UpdateWorkflowReport:
     """Preview the post-pull workflow against a savepoint and roll it back."""
+    _notify(progress, "Planning Spotify changes in dry-run sandbox...")
     spotify_plan = plan_snapshot(connection, snapshot)
     connection.execute("SAVEPOINT synctify_update_preview")
     try:
@@ -287,16 +310,20 @@ def preview_update_workflow(
             search_results=search_results,
             resolution_limit=resolution_limit,
             preview=True,
+            progress=progress,
         )
+        _notify(progress, "Planning downloads...")
         acquisitions = _group_pending_acquisitions(
             connection,
             acquisition_provider_factory,
         )
+        _notify(progress, "Checking playlist readiness...")
         readiness = playlist_readiness(connection)
     finally:
         connection.execute("ROLLBACK TO SAVEPOINT synctify_update_preview")
         connection.execute("RELEASE SAVEPOINT synctify_update_preview")
 
+    _notify(progress, "Dry-run preview complete.")
     return UpdateWorkflowReport(
         spotify=spotify_plan,
         resolution_sources=resolution_sources,
@@ -320,8 +347,10 @@ def run_update_workflow(
     search_results: int = 10,
     resolution_limit: int | None = None,
     allow_partial: bool = False,
+    progress: ProgressReporter | None = _stderr_progress,
 ) -> UpdateWorkflowReport:
     """Apply Spotify state, resolve with ordered fallback, acquire, then rebuild playlists."""
+    _notify(progress, "Applying Spotify desired state...")
     spotify_plan = plan_snapshot(connection, snapshot)
     apply_snapshot(connection, snapshot)
     connection.commit()
@@ -333,9 +362,11 @@ def run_update_workflow(
         search_results=search_results,
         resolution_limit=resolution_limit,
         preview=False,
+        progress=progress,
     )
     connection.commit()
 
+    _notify(progress, "Planning downloads...")
     planned_acquisitions = _group_pending_acquisitions(
         connection,
         acquisition_provider_factory,
@@ -345,13 +376,16 @@ def run_update_workflow(
         planned_acquisitions,
         acquisition_provider_factory,
         library_dir,
+        progress=progress,
     )
 
+    _notify(progress, "Building playlists...")
     playlists = build_playlists(
         connection,
         playlists_dir,
         allow_partial=allow_partial,
     )
+    _notify(progress, "Update workflow complete.")
     return UpdateWorkflowReport(
         spotify=spotify_plan,
         resolution_sources=resolution_sources,
