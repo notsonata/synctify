@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from synctify.db import connect, initialize
 from synctify.spotify.ingest import LIKED_SONGS_ID, PlaylistEntry, SpotifyTrack
 from synctify.spotify.selection import (
     PlaylistCatalogEntry,
+    SpotifySelectionCancelled,
     apply_playlist_choices,
     confirm_playlist,
+    fetch_one_playlist,
     fetch_playlist_catalog,
     list_playlist_catalog,
     list_playlist_items,
@@ -44,7 +48,7 @@ def _catalog(playlist_id: str = "playlist-1", name: str = "Playlist One") -> Pla
     )
 
 
-def test_fetch_catalog_includes_liked_songs_without_fetching_tracks() -> None:
+def test_fetch_catalog_includes_liked_and_followed_playlists_without_fetching_tracks() -> None:
     class FakeClient:
         def me(self):
             return {"id": "user-1"}
@@ -76,9 +80,43 @@ def test_fetch_catalog_includes_liked_songs_without_fetching_tracks() -> None:
     user_id, entries = fetch_playlist_catalog(FakeClient())  # type: ignore[arg-type]
 
     assert user_id == "user-1"
-    assert [entry.spotify_id for entry in entries] == [LIKED_SONGS_ID, "playlist-1"]
+    assert [entry.spotify_id for entry in entries] == [
+        LIKED_SONGS_ID,
+        "playlist-1",
+        "followed-1",
+    ]
     assert entries[0].name == "Liked Songs"
     assert entries[1].track_count == 42
+    assert entries[2].owner_id == "other"
+
+
+def test_playlist_fetch_checks_cancel_during_iteration() -> None:
+    playlist = _catalog()
+    calls = 0
+
+    class FakeClient:
+        def playlist_items(self, _playlist_id: str):
+            for index in range(200):
+                yield {
+                    "item": {
+                        "type": "track",
+                        "id": f"track-{index}",
+                        "name": f"Song {index}",
+                        "artists": [{"name": "Artist"}],
+                        "album": {"name": "Album"},
+                        "duration_ms": 180000,
+                        "external_ids": {"isrc": f"USAAA26{index:05d}"},
+                    },
+                    "added_at": f"2026-08-23T00:00:{index % 60:02d}Z",
+                }
+
+    def cancelled() -> bool:
+        nonlocal calls
+        calls += 1
+        return calls > 10
+
+    with pytest.raises(SpotifySelectionCancelled):
+        fetch_one_playlist(FakeClient(), playlist, cancelled=cancelled)  # type: ignore[arg-type]
 
 
 def test_exclusions_persist_and_new_tracks_stay_pending(tmp_path: Path) -> None:
@@ -123,6 +161,9 @@ def test_exclusions_persist_and_new_tracks_stay_pending(tmp_path: Path) -> None:
         ).fetchall()
         assert [row["track_id"] for row in active] == ["track-1"]
 
+        with pytest.raises(ValueError, match="already imported"):
+            confirm_playlist(connection, "playlist-1")
+
 
 def test_tracked_removals_are_pending_until_reviewed(tmp_path: Path) -> None:
     database = tmp_path / "synctify.sqlite3"
@@ -141,7 +182,6 @@ def test_tracked_removals_are_pending_until_reviewed(tmp_path: Path) -> None:
         assert items["track-1"].state == "pending_remove"
         assert not items["track-1"].present
 
-        # Pending removal does not mutate the active desired playlist.
         before = connection.execute(
             "SELECT track_id FROM playlist_tracks WHERE playlist_id = 'playlist-1' ORDER BY position"
         ).fetchall()
@@ -201,10 +241,16 @@ def test_schema_migrates_existing_imports_into_tracked_catalog(tmp_path: Path) -
         connection.execute(
             "INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES ('playlist-1', 'track-1', 0)"
         )
+        connection.execute("DELETE FROM spotify_playlist_catalog")
+        connection.execute("DELETE FROM spotify_playlist_items")
+        connection.execute("UPDATE metadata SET value = '5' WHERE key = 'schema_version'")
 
-    # Running initialize again represents upgrading an existing installation.
     initialize(database)
     with connect(database) as connection:
+        schema = connection.execute(
+            "SELECT value FROM metadata WHERE key = 'schema_version'"
+        ).fetchone()["value"]
+        assert schema == "6"
         catalog = {item.spotify_id: item for item in list_playlist_catalog(connection)}
         assert catalog["playlist-1"].tracked
         items = list_playlist_items(connection, "playlist-1")
