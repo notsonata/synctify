@@ -4,6 +4,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import selectors
 import sqlite3
 import subprocess
 import sys
@@ -11,10 +12,33 @@ import sys
 from .acquisition import pending_acquisitions
 from .audit import LibraryAuditReport, audit_library
 from .config import Settings
-from .db import connect
+from .db import connect, initialize
 from .doctor import DoctorReport, run_doctor
+from .gc import clean_unreferenced_tracks
+from .playlists import build_playlists
 from .resolution import set_manual_override
+from .spotify.auth import SpotifyAuth, SpotifyOAuthConfig
+from .spotify.client import SpotifyClient
+from .spotify.selection import (
+    PlaylistCatalogEntry,
+    PlaylistItemState,
+    SpotifySelectionCancelled,
+    apply_playlist_choices,
+    confirm_playlist,
+    fetch_one_playlist,
+    fetch_playlist_catalog,
+    list_playlist_catalog,
+    list_playlist_items,
+    refresh_playlist_items,
+    set_item_choice,
+    store_playlist_catalog,
+    unimport_playlist,
+    update_tracked_playlists,
+)
 from .user_config import effective_user_config, load_user_config
+
+CancelCheck = Callable[[], bool]
+ProgressReporter = Callable[[str], None]
 
 
 @dataclass(slots=True, frozen=True)
@@ -44,6 +68,7 @@ class UnresolvedTrack:
 class CommandResult:
     args: tuple[str, ...]
     returncode: int
+    cancelled: bool = False
 
 
 def _open_readonly(path: Path) -> sqlite3.Connection:
@@ -114,13 +139,19 @@ def read_dashboard(settings: Settings) -> DashboardState:
             if "sync_targets" in tables
             else 0
         )
-        last_pull_row = (
-            connection.execute(
-                "SELECT value FROM metadata WHERE key = 'spotify_last_pull_at'"
-            ).fetchone()
-            if "metadata" in tables
-            else None
-        )
+        last_pull_row = None
+        if "metadata" in tables:
+            for key in (
+                "spotify_tracked_fetched_at",
+                "spotify_catalog_fetched_at",
+                "spotify_last_pull_at",
+            ):
+                last_pull_row = connection.execute(
+                    "SELECT value FROM metadata WHERE key = ?",
+                    (key,),
+                ).fetchone()
+                if last_pull_row is not None:
+                    break
 
     return DashboardState(
         initialized=True,
@@ -216,13 +247,158 @@ def read_audit_report(settings: Settings) -> LibraryAuditReport:
         return audit_library(connection, settings.library_dir, repair=False)
 
 
+def read_spotify_playlists(settings: Settings) -> tuple[PlaylistCatalogEntry, ...]:
+    if not settings.database_path.exists() or not settings.database_path.is_file():
+        return ()
+    with _open_readonly(settings.database_path) as connection:
+        if "spotify_playlist_catalog" not in _tables(connection):
+            return ()
+        return list_playlist_catalog(connection)
+
+
+def read_spotify_playlist_items(
+    settings: Settings,
+    playlist_id: str,
+) -> tuple[PlaylistItemState, ...]:
+    if not settings.database_path.exists() or not settings.database_path.is_file():
+        return ()
+    with _open_readonly(settings.database_path) as connection:
+        if "spotify_playlist_items" not in _tables(connection):
+            return ()
+        return list_playlist_items(connection, playlist_id)
+
+
+def _spotify_client(settings: Settings) -> SpotifyClient:
+    config = SpotifyOAuthConfig.load(settings.spotify_config_path)
+    return SpotifyClient(SpotifyAuth(config))
+
+
+def fetch_spotify_playlists(
+    settings: Settings,
+    *,
+    cancelled: CancelCheck | None = None,
+    progress: ProgressReporter | None = None,
+) -> int:
+    settings.ensure_directories()
+    initialize(settings.database_path)
+    with _spotify_client(settings) as client:
+        user_id, entries = fetch_playlist_catalog(
+            client,
+            cancelled=cancelled,
+            progress=progress,
+        )
+    if cancelled is not None and cancelled():
+        raise SpotifySelectionCancelled("Spotify operation cancelled")
+    with connect(settings.database_path) as connection:
+        store_playlist_catalog(connection, user_id, entries)
+    return len(entries)
+
+
+def fetch_spotify_playlist_items(
+    settings: Settings,
+    playlist_id: str,
+    *,
+    cancelled: CancelCheck | None = None,
+    progress: ProgressReporter | None = None,
+) -> int:
+    settings.ensure_directories()
+    initialize(settings.database_path)
+    with connect(settings.database_path) as connection:
+        catalog = {item.spotify_id: item for item in list_playlist_catalog(connection)}
+        playlist = catalog.get(playlist_id)
+    if playlist is None:
+        raise KeyError(f"unknown Spotify playlist: {playlist_id}")
+    with _spotify_client(settings) as client:
+        entries = fetch_one_playlist(
+            client,
+            playlist,
+            cancelled=cancelled,
+            progress=progress,
+        )
+    if cancelled is not None and cancelled():
+        raise SpotifySelectionCancelled("Spotify operation cancelled")
+    with connect(settings.database_path) as connection:
+        refresh_playlist_items(connection, playlist_id, entries)
+    return len(entries)
+
+
+def fetch_tracked_spotify_updates(
+    settings: Settings,
+    *,
+    cancelled: CancelCheck | None = None,
+    progress: ProgressReporter | None = None,
+) -> int:
+    settings.ensure_directories()
+    initialize(settings.database_path)
+    with connect(settings.database_path) as connection:
+        with _spotify_client(settings) as client:
+            return update_tracked_playlists(
+                connection,
+                client,
+                cancelled=cancelled,
+                progress=progress,
+            )
+
+
+def choose_spotify_item(
+    settings: Settings,
+    playlist_id: str,
+    item_key: str,
+    included: bool,
+) -> None:
+    with connect(settings.database_path) as connection:
+        set_item_choice(
+            connection,
+            playlist_id,
+            item_key,
+            "included" if included else "excluded",
+        )
+
+
+def confirm_spotify_playlist(settings: Settings, playlist_id: str) -> None:
+    with connect(settings.database_path) as connection:
+        confirm_playlist(connection, playlist_id)
+
+
+def apply_spotify_playlist(
+    settings: Settings,
+    playlist_id: str,
+) -> None:
+    with connect(settings.database_path) as connection:
+        apply_playlist_choices(connection, playlist_id)
+        clean_unreferenced_tracks(connection, settings.library_dir, apply=True)
+        build_playlists(connection, settings.playlists_dir, allow_partial=True)
+
+
+def unimport_spotify_playlist(settings: Settings, playlist_id: str) -> None:
+    with connect(settings.database_path) as connection:
+        unimport_playlist(
+            connection,
+            playlist_id,
+            settings.library_dir,
+            settings.playlists_dir,
+        )
+
+
+def _stop_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 def run_cli_command(
     settings: Settings,
     args: Sequence[str],
     *,
     on_output: Callable[[str], None] | None = None,
+    cancelled: CancelCheck | None = None,
 ) -> CommandResult:
-    """Run an existing Synctify CLI command and stream merged stdout/stderr lines."""
+    """Run a Synctify CLI command with streamed output and cooperative cancellation."""
     normalized = tuple(str(part) for part in args)
     if not normalized:
         raise ValueError("command arguments are required")
@@ -245,23 +421,38 @@ def run_cli_command(
         env=environment,
     )
     if process.stdout is None:
-        process.terminate()
-        process.wait()
+        _stop_process(process)
         raise RuntimeError("failed to capture Synctify command output")
 
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    was_cancelled = False
     try:
-        for raw_line in process.stdout:
-            line = raw_line.rstrip("\r\n")
-            if on_output is not None:
-                on_output(line)
+        while True:
+            if cancelled is not None and cancelled():
+                was_cancelled = True
+                _stop_process(process)
+                break
+            events = selector.select(timeout=0.1)
+            for key, _mask in events:
+                raw_line = key.fileobj.readline()
+                if raw_line:
+                    if on_output is not None:
+                        on_output(raw_line.rstrip("\r\n"))
+            if process.poll() is not None:
+                for raw_line in process.stdout:
+                    if on_output is not None:
+                        on_output(raw_line.rstrip("\r\n"))
+                break
     except BaseException:
-        if process.poll() is None:
-            process.terminate()
-        process.wait()
+        _stop_process(process)
         raise
     finally:
-        close = getattr(process.stdout, "close", None)
-        if close is not None:
-            close()
+        selector.close()
+        process.stdout.close()
 
-    return CommandResult(args=normalized, returncode=process.wait())
+    return CommandResult(
+        args=normalized,
+        returncode=process.wait(),
+        cancelled=was_cancelled,
+    )
