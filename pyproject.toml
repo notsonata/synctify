@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-synctify = "synctify.migration_cli:app"
+synctify = "synctify.app:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/synctify"]
