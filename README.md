@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 1.0.5**
+**Current version: 1.0.6**
 
 Synctify is a local-first macOS music library manager. Spotify defines the desired playlist/library state; Synctify resolves those tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and can keep a non-destructive cloud backup.
 
@@ -39,7 +39,7 @@ Streamrip is required for automatic catalog resolution used by `synctify resolve
 
 ### macOS release ZIP
 
-For normal use, download `synctify-1.0.5-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
+For normal use, download `synctify-1.0.6-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
 
 From Terminal, enter the extracted folder and install the stable command:
 
@@ -50,7 +50,7 @@ From Terminal, enter the extracted folder and install the stable command:
 The installer stores the application under:
 
 ```text
-~/Library/Application Support/Synctify/app/releases/1.0.5
+~/Library/Application Support/Synctify/app/releases/1.0.6
 ```
 
 and points:
@@ -93,14 +93,14 @@ The stable `~/.local/bin/synctify` wrapper always launches `app/current/synctify
 
 Synctify's database, configuration, canonical library, and playlists remain separate from the replaceable application release. The database, configuration, and generated playlists use the normal macOS application-data location. The canonical library uses that location by default but can be pointed at another absolute directory during setup or with `synctify config set library-dir /absolute/path/to/Music`. Set `SYNCTIFY_HOME` to override the application-data directory.
 
-The GitHub Release publishes `synctify-1.0.5-macos.zip` and `synctify-1.0.5.tar.gz` as the authored release assets. The matching Python wheel is bundled inside the macOS ZIP rather than published as a separate asset. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
+The GitHub Release publishes `synctify-1.0.6-macos.zip` and `synctify-1.0.6.tar.gz` as the authored release assets. The matching Python wheel is bundled inside the macOS ZIP rather than published as a separate asset. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
 
 ### Self-update
 
 Installed Synctify checks GitHub for a newer stable release every time the `synctify` command is run. The default policy is `prompt`. If a newer release exists in an interactive terminal, Synctify asks before installing it:
 
 ```text
-Synctify 1.0.6 is available (current: 1.0.5). Update now? [Y/n]
+Synctify 1.0.7 is available (current: 1.0.6). Update now? [Y/n]
 ```
 
 Answering yes downloads the matching macOS release bundle, validates its stable tag, expected asset name, archive layout, embedded `VERSION`, and GitHub-provided SHA-256 digest when available, installs it into `app/releases/<version>`, switches `app/current`, and restarts the original command under the new version.
@@ -266,6 +266,8 @@ Apply the full workflow:
 ```bash
 synctify update
 ```
+
+Long update and dry-run operations report their current stage to stderr, including Spotify fetching, automatic-resolution source and track counts, download planning/acquisition, playlist readiness, and playlist rebuilding. The final structured workflow report remains on stdout.
 
 The workflow:
 
