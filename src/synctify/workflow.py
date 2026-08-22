@@ -21,6 +21,7 @@ from .playlists import (
 )
 from .providers.base import AcquisitionProvider
 from .resolution import ResolutionStatus
+from .resolution_policy import clear_unsupported_resolutions
 from .spotify.ingest import SpotifySnapshot
 from .spotify.state import ChangePlan, apply_snapshot, format_plan, plan_snapshot
 
@@ -180,6 +181,11 @@ def _run_resolution_priority(
             raise ValueError(
                 f"automatic-resolution source {source!r} is unsupported; supported: {supported}"
             )
+
+    # Releases before the canonical-lossless policy could persist SoundCloud
+    # resolutions. Remove those obsolete rows before selecting unresolved tracks;
+    # preview callers run inside a savepoint, so this migration is rolled back there.
+    clear_unsupported_resolutions(connection)
 
     selected_tracks = pending_resolution_tracks(connection, limit=resolution_limit)
     selected_ids = tuple(track.spotify_id for track in selected_tracks)
