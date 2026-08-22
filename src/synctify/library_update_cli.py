@@ -69,6 +69,7 @@ def configured_update(
                     search_provider,
                     priority,
                     provider_factory,
+                    settings.library_dir,
                     search_results=search_results,
                     resolution_limit=resolution_limit,
                 )
