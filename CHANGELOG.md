@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.4 - 2026-08-22
+
+Synctify 1.0.4 adds a stable macOS installation layout so users can run `synctify` from anywhere instead of keeping Terminal inside an extracted release folder.
+
+### Stable macOS installation
+
+- add `./synctify.sh install` to install the release bundle into Synctify's application-data area
+- store application payloads in versioned `app/releases/<version>` directories
+- maintain an `app/current` symlink that selects the active application release
+- install a stable `~/.local/bin/synctify` wrapper that always launches `app/current/synctify.sh`
+- add `~/.local/bin` to the user's shell profile when required, while keeping the extracted bundle usable in portable mode
+- keep each installed release's private `.venv` isolated inside that versioned application payload
+- preserve database, configuration, playlists, and canonical library paths separately from the replaceable application payload
+- establish the versioned/current layout needed for a future atomic self-update implementation
+
+### Distribution validation
+
+- include the executable installer in the macOS release ZIP
+- smoke-test the stable installed command in normal CI and the tag-triggered release workflow
+- add installer coverage for the versioned app layout, `current` symlink, PATH setup, and argument forwarding
+
+No SQLite schema migration is required for this release.
+
 ## 1.0.3 - 2026-08-22
 
 Synctify 1.0.3 adds first-class configuration for the canonical local FLAC library directory and aligns release metadata for the updated macOS bundle.
