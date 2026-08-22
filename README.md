@@ -1,8 +1,8 @@
 # Synctify
 
-**Current version: 1.2.2**
+**Current version: 1.2.3**
 
-Synctify is a local-first macOS music library manager. Spotify supplies playlist metadata and the user's desired selections; Synctify reuses safe existing local FLACs first, resolves only still-missing confirmed tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and keeps cloud backups non-destructive.
+Synctify is a local-first macOS music library manager. Spotify supplies playlist metadata and the user's desired selections; Synctify reuses verified existing local FLACs first, resolves only still-missing confirmed tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and keeps cloud backups non-destructive.
 
 ## Architecture
 
@@ -13,7 +13,7 @@ User-reviewed playlists and tracks
         ↓
 Confirmed Synctify desired state
         ↓
-Match against canonical local FLAC library
+Verify recorded local FLACs / exact-ISRC reuse
         ↓ missing tracks only
 Automatic resolution via Streamrip catalog search
 Qobuz → Tidal → Deezer
@@ -45,7 +45,7 @@ Streamrip is required for automatic catalog resolution used by `synctify resolve
 
 ### macOS release ZIP
 
-For normal use, download `synctify-1.2.2-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
+For normal use, download `synctify-1.2.3-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
 
 From Terminal, enter the extracted folder and install the stable command:
 
@@ -56,14 +56,14 @@ From Terminal, enter the extracted folder and install the stable command:
 The installer stores the application under:
 
 ```text
-~/Library/Application Support/Synctify/app/releases/1.2.2
+~/Library/Application Support/Synctify/app/releases/1.2.3
 ```
 
 and points `~/Library/Application Support/Synctify/app/current` at that version. It also creates `~/.local/bin/synctify` and adds `~/.local/bin` to your shell PATH when needed.
 
 The first application launch finds Python 3.12+, creates a private `.venv` inside the active versioned application release, and installs the matching Python wheel bundled inside the macOS ZIP. Internet access is required during that first bootstrap for Python dependencies.
 
-The GitHub Release publishes `synctify-1.2.2-macos.zip` and `synctify-1.2.2.tar.gz` as authored release assets. Streamrip, qobuz-dl, and rclone remain external tools.
+The GitHub Release publishes `synctify-1.2.3-macos.zip` and `synctify-1.2.3.tar.gz` as authored release assets. Streamrip, qobuz-dl, and rclone remain external tools.
 
 After installation:
 
@@ -87,7 +87,7 @@ synctify upgrade
 Installed Synctify checks GitHub for a newer stable application release according to the configured auto-update policy. In the default interactive policy it asks:
 
 ```text
-Synctify application 1.2.3 is available (current: 1.2.2). Upgrade now? [Y/n]
+Synctify application 1.2.4 is available (current: 1.2.3). Upgrade now? [Y/n]
 ```
 
 Update policy:
@@ -168,7 +168,9 @@ Dashboard | Spotify | Unresolved | Doctor | Audit | Commands
 
 The Spotify tab is the primary import/update workflow. The Commands tab remains available for non-interactive operations such as `acquire --source tidal`, `sync phone`, `backup cloud`, and `config show`.
 
-Long-running TUI actions show a visible loading indicator and status message. During automatic resolution the bottom operation strip becomes a determinate progress bar and shows the source, current/total count, and current track, for example `Qobuz resolution 23/1528 · Artist - Track`. Starting **Library Update** from the dashboard stays on the current tab instead of forcing the Commands tab open. Conflicting action buttons are disabled while work is running. Press **Esc** or choose **Cancel (Esc)** to cancel the active cancellable operation. Child CLI processes are terminated and reaped on cancellation.
+The Dashboard reports **active imported desired state only**. Historical track rows retained for migration/review no longer inflate Tracks, Local FLACs, Unresolved, or Stored resolutions. During Library Update the status stream also prints the active playlist scope, and every resolver line includes the owning imported playlist name, for example `Resolving via deezer [18/223] Liked Songs · Cage The Elephant - Trouble`.
+
+Long-running TUI actions show a visible loading indicator and status message. During automatic resolution the bottom operation strip becomes a determinate progress bar and shows the source, current/total count, owning playlist, and current track. Starting **Library Update** from the dashboard stays on the current tab instead of forcing the Commands tab open. Conflicting action buttons are disabled while work is running. Press **Esc** or choose **Cancel (Esc)** to cancel the active cancellable operation. Child CLI processes are terminated and reaped on cancellation.
 
 Keyboard shortcuts:
 
@@ -205,13 +207,13 @@ synctify update
 The workflow:
 
 1. uses only playlists/tracks already confirmed in Synctify
-2. preserves valid recorded FLAC paths for matching Spotify track IDs
-3. scans the canonical library once and safely matches other existing FLACs by ISRC/metadata
+2. verifies recorded FLAC paths against the Spotify track identity before reuse
+3. scans the canonical library once and auto-adopts an unrecorded FLAC only for a unique exact ISRC match
 4. resolves only confirmed tracks that still have no usable local FLAC
 5. acquires only still-missing resolved tracks
 6. rebuilds generated playlists
 
-A track with a valid canonical `local_path` never enters automatic provider resolution. An approved track without a recorded path is first compared with the existing FLAC library using the same conservative reconciliation rules used by acquisition. This means files you already have are reused rather than downloaded again.
+A recorded local path is no longer trusted solely because the file exists. Synctify verifies the FLAC metadata against the Spotify identity first, which also repairs bad automatic assignments made by 1.2.2. Unknown local files are not fuzzy-matched during automatic Library Update: a unique exact ISRC is required. Metadata-only candidates remain unresolved rather than risking the wrong song being attached to a Spotify track.
 
 Useful controls:
 
@@ -223,7 +225,7 @@ synctify update --resolution-limit 25
 synctify update --allow-partial
 ```
 
-Long update and dry-run operations report their current stage to stderr. Resolution also reports each current track as `Resolving via SOURCE [CURRENT/TOTAL] Artist - Track`; the TUI uses those messages for its progress bar. The final structured workflow report remains on stdout.
+Long update and dry-run operations report their current stage to stderr. Resolution reports each current track as `Resolving via SOURCE [CURRENT/TOTAL] PLAYLIST · Artist - Track`; the TUI uses those messages for its progress bar. If provider lookup simply leaves approved tracks unresolved, the update completes with an incomplete-playlist warning instead of returning status 2. Exit status 2 is reserved for actual search/provider/download errors. The final structured workflow report remains on stdout.
 
 ## Resolution and acquisition
 
@@ -266,7 +268,7 @@ synctify acquire --source tidal
 synctify acquire --source deezer
 ```
 
-Existing FLAC reconciliation is constrained to the canonical library and only adopts a unique safe metadata/ISRC match.
+Automatic Library Update uses exact-identity local reuse. The separate relink/reconciliation tools remain available for deliberate broader recovery workflows.
 
 ## Source policy
 
@@ -434,11 +436,11 @@ Relink copies/adopts only safe one-to-one matches for currently desired tracks. 
 
 ## Database migration
 
-Synctify 1.2.2 uses schema v7 to enforce review-before-download semantics for databases that passed through the older all-at-once import model.
+Synctify 1.2.2 introduced schema v7 to enforce review-before-download semantics for databases that passed through the older all-at-once import model. Synctify 1.2.3 keeps schema v7 and requires no new database migration.
 
 When upgrading a schema v6 database, Synctify moves previously tracked Spotify playlists back to review state and removes their playlist references from active desired state. Previously included items become pending additions; existing exclusions remain excluded. The migration **does not delete track rows, local FLAC files, recorded local paths/hashes, provider mappings, or cloud backups**.
 
-After the migration, fetch/review the Spotify playlists you want and confirm them. When a confirmed Spotify track already has a valid recorded local FLAC, Synctify reuses it. If the recorded path is missing, Synctify scans the canonical library for a unique safe ISRC/metadata match before contacting any provider.
+After the migration, fetch/review the Spotify playlists you want and confirm them. Library Update then validates recorded local files and only auto-adopts otherwise-unrecorded FLACs through a unique exact ISRC match before contacting any provider.
 
 Run this explicitly if Doctor reports an older schema:
 
