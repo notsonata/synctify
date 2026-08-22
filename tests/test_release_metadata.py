@@ -14,7 +14,7 @@ def test_release_version_is_consistent() -> None:
     version = pyproject["project"]["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert version == "1.2.0"
+    assert version == "1.2.1"
     assert synctify.__version__ == version
     assert f"**Current version: {version}**" in readme
 
@@ -35,18 +35,20 @@ def test_readme_describes_current_automatic_resolution_contract() -> None:
     assert "Automatic Streamrip resolution currently requires a usable Spotify ISRC" in readme
     assert "same provider track ID appears in both query result sets" in readme
     assert "Tracks without a Spotify ISRC" in readme
+    assert "Synctify never starts an interactive Tidal login" in readme
+    assert "rip config --tidal" in readme
 
 
 def test_readme_documents_release_zip_launcher() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "synctify-1.2.0-macos.zip" in readme
+    assert "synctify-1.2.1-macos.zip" in readme
     assert "./synctify.sh" in readme
     assert "./synctify.sh install" in readme
     assert "~/.local/bin/synctify" in readme
     assert "app/current" in readme
     assert "private `.venv`" in readme
-    assert "synctify-1.2.0.tar.gz" in readme
+    assert "synctify-1.2.1.tar.gz" in readme
     assert "matching Python wheel bundled inside the macOS ZIP" in readme
     assert "The GitHub Release also includes `SHA256SUMS`" not in readme
 
@@ -84,7 +86,9 @@ def test_readme_documents_tui_playlist_browser_and_cancellation() -> None:
     assert "Confirm Playlist" in readme
     assert "Apply Choices" in readme
     assert "Press **Esc**" in readme
-    assert "loading indicator" in readme
+    assert "determinate progress bar" in readme
+    assert "current/total count" in readme
+    assert "stays on the current tab" in readme
     assert "acquire --source tidal" in readme
 
 
@@ -100,6 +104,7 @@ def test_readme_documents_update_progress() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "report their current stage to stderr" in readme
+    assert "Resolving via SOURCE [CURRENT/TOTAL] Artist - Track" in readme
     assert "final structured workflow report remains on stdout" in readme
 
 

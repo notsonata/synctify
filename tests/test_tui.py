@@ -5,7 +5,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from textual.widgets import Button, DataTable, Input, LoadingIndicator, TabbedContent
+from textual.widgets import (
+    Button,
+    DataTable,
+    Input,
+    LoadingIndicator,
+    ProgressBar,
+    Static,
+    TabbedContent,
+)
 
 from synctify.config import Settings
 from synctify.db import connect, initialize
@@ -306,6 +314,7 @@ def test_tui_mounts_spotify_tab_busy_indicator_and_keyboard_tabs(tmp_path: Path)
             assert tabs.active == "dashboard"
             assert app.query_one("#unresolved-table", DataTable).row_count == 0
             assert app.query_one("#busy-indicator", LoadingIndicator).display is False
+            assert app.query_one("#busy-progress", ProgressBar).display is False
             assert app.query_one("#cancel-action", Button).disabled is True
 
             await pilot.press("2")
@@ -330,5 +339,41 @@ def test_tui_mounts_spotify_tab_busy_indicator_and_keyboard_tabs(tmp_path: Path)
             await pilot.pause()
             assert tabs.active == "commands"
             assert app.query_one("#command-input", Input)
+
+    asyncio.run(exercise())
+
+
+def test_tui_renders_resolution_progress_in_operation_strip(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    async def exercise() -> None:
+        app = SynctifyTUI(settings=settings)
+        async with app.run_test(size=(150, 48)) as pilot:
+            tabs = app.query_one("#tabs", TabbedContent)
+            assert tabs.active == "dashboard"
+            assert app._set_busy("Library update")
+
+            app._append_command_output(
+                "[update] Resolving via qobuz [23/100] Radiohead - Paranoid Android"
+            )
+            await pilot.pause()
+
+            progress = app.query_one("#busy-progress", ProgressBar)
+            indicator = app.query_one("#busy-indicator", LoadingIndicator)
+            label = app.query_one("#busy-label", Static)
+            assert tabs.active == "dashboard"
+            assert progress.display is True
+            assert indicator.display is False
+            rendered = str(label.render())
+            assert "Qobuz resolution 23/100" in rendered
+            assert "Radiohead - Paranoid Android" in rendered
+
+            app._append_command_output("[update] Planning downloads...")
+            await pilot.pause()
+            assert progress.display is False
+            assert indicator.display is True
+            assert "Planning downloads" in str(label.render())
+
+            app._clear_busy("done")
 
     asyncio.run(exercise())

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.1 - 2026-08-23
+
+Synctify 1.2.1 prevents automatic Tidal resolution from spawning repeated login pages and makes long library updates show useful live progress in the TUI.
+
+### Tidal authentication safety
+
+- preflight Streamrip's saved Tidal session before automatic Tidal catalog searches
+- never initiate interactive Tidal/device authentication from `synctify update` or automatic resolution
+- skip Tidal once when its saved session is missing or expired, report the reason, and continue to the next configured fallback source
+- instruct users to run `rip config --tidal` manually in Terminal when Tidal authentication needs to be established or refreshed
+- close Streamrip search stdin so batch searches cannot wait for interactive input
+
+### Resolver and TUI progress
+
+- emit per-track automatic-resolution progress with source, current/total count, artist, and title
+- replace the generic TUI spinner with a determinate progress bar while tracks are being resolved
+- keep the current TUI tab visible when Library Update starts instead of forcing the Commands tab open
+- continue streaming full command output into the Commands log for diagnostics
+- preserve Escape / Cancel behavior for the active child command
+
+No SQLite schema migration is required for this release.
+
 ## 1.2.0 - 2026-08-23
 
 Synctify 1.2.0 replaces the all-at-once Spotify import with a staged, user-reviewed playlist workflow and makes long-running TUI actions visibly cancellable.

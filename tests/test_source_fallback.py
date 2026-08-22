@@ -208,6 +208,10 @@ def test_cli_custom_source_order_is_used_for_fallback(tmp_path: Path, monkeypatc
     home = tmp_path / "home"
     monkeypatch.setenv("SYNCTIFY_HOME", str(home))
     monkeypatch.setattr("synctify.cli_entry._fetch_update_snapshot", lambda settings: _snapshot())
+    monkeypatch.setattr(
+        "synctify.cli_entry.StreamripCatalogSearch.require_noninteractive_source_ready",
+        lambda self, source: None,
+    )
     calls: list[str] = []
 
     def fake_search(self, track, source: str, limit=None):

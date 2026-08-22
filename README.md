@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 1.2.0**
+**Current version: 1.2.1**
 
 Synctify is a local-first macOS music library manager. Spotify supplies playlist metadata and the user's desired selections; Synctify resolves confirmed tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and keeps cloud backups non-destructive.
 
@@ -43,7 +43,7 @@ Streamrip is required for automatic catalog resolution used by `synctify resolve
 
 ### macOS release ZIP
 
-For normal use, download `synctify-1.2.0-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
+For normal use, download `synctify-1.2.1-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
 
 From Terminal, enter the extracted folder and install the stable command:
 
@@ -54,14 +54,14 @@ From Terminal, enter the extracted folder and install the stable command:
 The installer stores the application under:
 
 ```text
-~/Library/Application Support/Synctify/app/releases/1.2.0
+~/Library/Application Support/Synctify/app/releases/1.2.1
 ```
 
 and points `~/Library/Application Support/Synctify/app/current` at that version. It also creates `~/.local/bin/synctify` and adds `~/.local/bin` to your shell PATH when needed.
 
 The first application launch finds Python 3.12+, creates a private `.venv` inside the active versioned application release, and installs the matching Python wheel bundled inside the macOS ZIP. Internet access is required during that first bootstrap for Python dependencies.
 
-The GitHub Release publishes `synctify-1.2.0-macos.zip` and `synctify-1.2.0.tar.gz` as authored release assets. Streamrip, qobuz-dl, and rclone remain external tools.
+The GitHub Release publishes `synctify-1.2.1-macos.zip` and `synctify-1.2.1.tar.gz` as authored release assets. Streamrip, qobuz-dl, and rclone remain external tools.
 
 After installation:
 
@@ -85,7 +85,7 @@ synctify upgrade
 Installed Synctify checks GitHub for a newer stable application release according to the configured auto-update policy. In the default interactive policy it asks:
 
 ```text
-Synctify application 1.2.1 is available (current: 1.2.0). Upgrade now? [Y/n]
+Synctify application 1.2.2 is available (current: 1.2.1). Upgrade now? [Y/n]
 ```
 
 Update policy:
@@ -166,7 +166,7 @@ Dashboard | Spotify | Unresolved | Doctor | Audit | Commands
 
 The Spotify tab is the primary import/update workflow. The Commands tab remains available for non-interactive operations such as `acquire --source tidal`, `sync phone`, `backup cloud`, and `config show`.
 
-Long-running TUI actions show a visible loading indicator and status message. Conflicting action buttons are disabled while work is running. Press **Esc** or choose **Cancel (Esc)** to cancel the active cancellable operation. Child CLI processes are terminated and reaped on cancellation.
+Long-running TUI actions show a visible loading indicator and status message. During automatic resolution the bottom operation strip becomes a determinate progress bar and shows the source, current/total count, and current track, for example `Qobuz resolution 23/1528 · Artist - Track`. Starting **Library Update** from the dashboard stays on the current tab instead of forcing the Commands tab open. Conflicting action buttons are disabled while work is running. Press **Esc** or choose **Cancel (Esc)** to cancel the active cancellable operation. Child CLI processes are terminated and reaped on cancellation.
 
 Keyboard shortcuts:
 
@@ -186,7 +186,7 @@ q Quit
 
 ## Library update
 
-`synctify update` now means only the confirmed Synctify music-library workflow. It does not fetch Spotify playlists or silently add new Spotify tracks.
+`synctify update` means only the confirmed Synctify music-library workflow. It does not fetch Spotify playlists or silently add new Spotify tracks.
 
 Preview:
 
@@ -218,7 +218,7 @@ synctify update --resolution-limit 25
 synctify update --allow-partial
 ```
 
-Long update and dry-run operations report their current stage to stderr. The final structured workflow report remains on stdout.
+Long update and dry-run operations report their current stage to stderr. Resolution also reports each current track as `Resolving via SOURCE [CURRENT/TOTAL] Artist - Track`; the TUI uses those messages for its progress bar. The final structured workflow report remains on stdout.
 
 ## Resolution and acquisition
 
@@ -229,6 +229,18 @@ Qobuz → Tidal → Deezer
 ```
 
 Automatic Streamrip resolution currently requires a usable Spotify ISRC. Synctify searches both that ISRC and the track's artist/title and accepts a catalog candidate only when the same provider track ID appears in both query result sets. Tracks without a Spotify ISRC, or without cross-query agreement, remain unresolved for manual handling rather than being guessed from title/artist alone.
+
+### Tidal authentication safety
+
+Synctify never starts an interactive Tidal login during automatic resolution or Library Update. Before running Tidal searches, it checks Streamrip's saved Tidal session. If the session is missing or expired, Synctify skips Tidal once and continues to the next configured fallback instead of spawning repeated browser/device-login pages.
+
+Authenticate or refresh Tidal manually in Terminal:
+
+```bash
+rip config --tidal
+```
+
+Complete that authentication once, then rerun Synctify. Provider authentication is intentionally kept outside unattended/batch resolution.
 
 Inspect or override mappings:
 
@@ -417,7 +429,7 @@ Relink copies/adopts only safe one-to-one matches for currently desired tracks. 
 
 ## Database migration
 
-Synctify 1.2 introduces schema v6 for the staged Spotify catalog, persistent track exclusions, and pending additions/removals. Normal initialization/setup applies the migration. Existing imported Spotify playlists are seeded into the new catalog as tracked with their existing tracks marked included.
+Synctify 1.2 uses schema v6 for the staged Spotify catalog, persistent track exclusions, and pending additions/removals. Normal initialization/setup applies the migration. Existing imported Spotify playlists are seeded into the new catalog as tracked with their existing tracks marked included.
 
 Run this explicitly if Doctor reports an older schema:
 

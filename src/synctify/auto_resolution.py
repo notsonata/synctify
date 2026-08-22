@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
 
 from .models import Track
 from .resolution import Candidate, Resolution, ResolutionStatus, resolve_track, save_resolution
@@ -22,6 +22,9 @@ class CatalogSearchProvider(Protocol):
         *,
         limit: int | None = None,
     ) -> Sequence[Candidate]: ...
+
+
+TrackProgressReporter = Callable[[str, int, int, Track], None]
 
 
 @dataclass(slots=True, frozen=True)
@@ -161,6 +164,7 @@ def auto_resolve_tracks(
     search_results: int = 10,
     dry_run: bool = False,
     spotify_ids: Sequence[str] | None = None,
+    progress: TrackProgressReporter | None = None,
 ) -> AutoResolutionReport:
     normalized_source = source.strip().lower()
     if not search_provider.supports(normalized_source):
@@ -171,12 +175,20 @@ def auto_resolve_tracks(
     if search_results < 1:
         raise ValueError("search_results must be at least 1")
 
-    attempts: list[AutoResolutionAttempt] = []
-    for track in pending_resolution_tracks(
+    readiness_check = getattr(search_provider, "require_noninteractive_source_ready", None)
+    if callable(readiness_check):
+        readiness_check(normalized_source)
+
+    tracks = pending_resolution_tracks(
         connection,
         limit=limit,
         spotify_ids=spotify_ids,
-    ):
+    )
+    total = len(tracks)
+    attempts: list[AutoResolutionAttempt] = []
+    for index, track in enumerate(tracks, start=1):
+        if progress is not None:
+            progress(normalized_source, index, total, track)
         try:
             candidates = tuple(
                 search_provider.search(
