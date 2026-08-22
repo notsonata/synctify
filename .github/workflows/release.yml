@@ -42,6 +42,7 @@ jobs:
           .venv-release/bin/python -m pip install dist/synctify-*.whl
           .venv-release/bin/synctify --help >/dev/null
           .venv-release/bin/synctify tui --help >/dev/null
+          .venv-release/bin/synctify self-update --help >/dev/null
           VERSION="$VERSION" .venv-release/bin/python -c 'import os, synctify; assert synctify.__version__ == os.environ["VERSION"]'
       - name: Build macOS distribution bundle
         run: python scripts/build_distribution.py --dist-dir dist
@@ -56,6 +57,7 @@ jobs:
           test -x ".dist-release/${BUNDLE}/install.sh"
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" --help >/dev/null
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" tui --help >/dev/null
+          SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" self-update --help >/dev/null
           HOME="$PWD/.dist-home" \
             SHELL="/bin/zsh" \
             SYNCTIFY_PROFILE="$PWD/.dist-home/.zprofile" \
@@ -65,6 +67,9 @@ jobs:
           HOME="$PWD/.dist-home" \
             SYNCTIFY_PYTHON="$(command -v python)" \
             ".dist-home/.local/bin/synctify" --help >/dev/null
+          HOME="$PWD/.dist-home" \
+            SYNCTIFY_PYTHON="$(command -v python)" \
+            ".dist-home/.local/bin/synctify" self-update --help >/dev/null
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
