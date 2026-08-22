@@ -14,8 +14,9 @@ runner = CliRunner()
 
 def test_effective_config_applies_environment_overrides(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    config = set_user_config(Path.cwd() / ".test-unused-config", "qobuz-quality", "27")
+    config = set_user_config(tmp_path, "qobuz-quality", "27")
     monkeypatch.setenv("SYNCTIFY_SOURCES", "tidal,qobuz")
     monkeypatch.setenv("SYNCTIFY_QOBUZ_DL", "/env/qobuz-dl")
     monkeypatch.setenv("SYNCTIFY_STREAMRIP", "/env/rip")
@@ -61,14 +62,14 @@ def test_config_show_invalid_quality_env_exits_cleanly(
 
     assert result.exit_code == 2
     assert "qobuz_quality must be one of" in result.output
-    assert result.exception is not None
 
 
 def test_acquire_invalid_explicit_qobuz_quality_exits_before_base_command(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("SYNCTIFY_HOME", str(tmp_path))
+    home = tmp_path / "home"
+    monkeypatch.setenv("SYNCTIFY_HOME", str(home))
 
     result = runner.invoke(
         app,
@@ -77,7 +78,7 @@ def test_acquire_invalid_explicit_qobuz_quality_exits_before_base_command(
 
     assert result.exit_code == 2
     assert "qobuz_quality must be one of" in result.output
-    assert not tmp_path.exists()
+    assert not home.exists()
 
 
 def test_acquire_invalid_streamrip_quality_env_exits_cleanly(
