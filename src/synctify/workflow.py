@@ -26,7 +26,7 @@ from .spotify.state import ChangePlan, apply_snapshot, format_plan, plan_snapsho
 
 
 AcquisitionProviderFactory = Callable[[str], AcquisitionProvider]
-DEFAULT_SOURCE_PRIORITY = ("qobuz", "tidal", "deezer", "soundcloud")
+DEFAULT_SOURCE_PRIORITY = ("qobuz", "tidal", "deezer")
 
 
 @dataclass(slots=True, frozen=True)

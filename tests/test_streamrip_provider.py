@@ -29,14 +29,13 @@ def candidate(provider: str = "qobuz", provider_track_id: str = "123456789") -> 
     )
 
 
-def test_streamrip_provider_conforms_to_protocol_and_lists_sources() -> None:
+def test_streamrip_provider_conforms_to_protocol_and_lists_lossless_sources() -> None:
     provider = StreamripProvider()
     assert isinstance(provider, AcquisitionProvider)
     assert provider.name == "streamrip"
-    assert provider.supported_sources == frozenset(
-        {"qobuz", "tidal", "deezer", "soundcloud"}
-    )
+    assert provider.supported_sources == frozenset({"qobuz", "tidal", "deezer"})
     assert provider.supported_sources == STREAMRIP_SOURCES
+    assert provider.supports("soundcloud") is False
 
 
 def test_streamrip_command_uses_exact_id_file(tmp_path: Path) -> None:
@@ -59,7 +58,7 @@ def test_streamrip_command_uses_exact_id_file(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.parametrize("source", ["qobuz", "tidal", "deezer", "soundcloud"])
+@pytest.mark.parametrize("source", ["qobuz", "tidal", "deezer"])
 def test_streamrip_acquire_passes_source_and_exact_track_id(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -94,6 +93,13 @@ def test_streamrip_acquire_passes_source_and_exact_track_id(
     assert acquired.provider == source
     assert acquired.provider_track_id == f"{source}-id"
     assert acquired.reconciled is False
+
+
+def test_streamrip_rejects_soundcloud_before_downloader_runs(tmp_path: Path) -> None:
+    provider = StreamripProvider(runner=lambda *_args, **_kwargs: pytest.fail("runner called"))
+
+    with pytest.raises(ValueError, match="canonical FLAC"):
+        provider.acquire(candidate("soundcloud"), tmp_path)
 
 
 def test_streamrip_reconciles_existing_flac_when_no_new_file_is_created(

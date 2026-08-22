@@ -5,8 +5,10 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_SOURCE_PRIORITY = ("qobuz", "tidal", "deezer", "soundcloud")
-QOBUZ_QUALITIES = frozenset({5, 6, 7, 27})
+DEFAULT_SOURCE_PRIORITY = ("qobuz", "tidal", "deezer")
+_LEGACY_SOURCE_PRIORITY = (*DEFAULT_SOURCE_PRIORITY, "soundcloud")
+QOBUZ_QUALITIES = frozenset({6, 7, 27})
+_LEGACY_QOBUZ_QUALITIES = frozenset({5, 6, 7, 27})
 STREAMRIP_QUALITIES = frozenset({0, 1, 2, 3, 4})
 
 
@@ -24,6 +26,8 @@ class UserConfig:
     streamrip_qobuz_quality: int = 4
     streamrip_tidal_quality: int = 3
     streamrip_deezer_quality: int = 2
+    # Kept so existing config/portable files remain readable. SoundCloud itself
+    # is not an automatic/acquisition source for Synctify's canonical FLAC library.
     streamrip_soundcloud_quality: int = 2
 
     def streamrip_quality_for(self, source: str) -> int:
@@ -48,7 +52,11 @@ def config_path(home: Path) -> Path:
     return home / "config.json"
 
 
-def _normalize_priority(value: object) -> tuple[str, ...]:
+def _normalize_priority(
+    value: object,
+    *,
+    allow_legacy: bool = False,
+) -> tuple[str, ...]:
     if isinstance(value, str):
         raw = value.split(",")
     elif isinstance(value, (list, tuple)):
@@ -58,7 +66,8 @@ def _normalize_priority(value: object) -> tuple[str, ...]:
     values = tuple(str(item).strip().lower() for item in raw if str(item).strip())
     if not values:
         raise UserConfigError("source_priority cannot be empty")
-    unknown = [item for item in values if item not in DEFAULT_SOURCE_PRIORITY]
+    allowed = _LEGACY_SOURCE_PRIORITY if allow_legacy else DEFAULT_SOURCE_PRIORITY
+    unknown = [item for item in values if item not in allowed]
     if unknown:
         raise UserConfigError(f"unsupported source(s): {', '.join(unknown)}")
     if len(set(values)) != len(values):
@@ -78,17 +87,26 @@ def _quality(value: object, allowed: frozenset[int], label: str) -> int:
 
 
 def validate_value(key: str, value: object) -> object:
+    """Parse stored/portable values, including legacy lossy settings."""
     if key == "source_priority":
-        return _normalize_priority(value)
+        return _normalize_priority(value, allow_legacy=True)
     if key in {"qobuz_dl", "streamrip", "rclone"}:
         if not isinstance(value, str) or not value.strip():
             raise UserConfigError(f"{key} cannot be empty")
         return value.strip()
     if key == "qobuz_quality":
-        return _quality(value, QOBUZ_QUALITIES, key)
+        return _quality(value, _LEGACY_QOBUZ_QUALITIES, key)
     if key.startswith("streamrip_") and key.endswith("_quality"):
         return _quality(value, STREAMRIP_QUALITIES, key)
     raise UserConfigError(f"unknown config key: {key}")
+
+
+def _validate_runtime_value(key: str, value: object) -> object:
+    if key == "source_priority":
+        return _normalize_priority(value)
+    if key == "qobuz_quality":
+        return _quality(value, QOBUZ_QUALITIES, key)
+    return validate_value(key, value)
 
 
 def _read_overrides(path: Path) -> dict[str, object]:
@@ -111,7 +129,18 @@ def load_user_config(home: Path) -> UserConfig:
     overrides = _read_overrides(path)
     values = UserConfig().as_dict()
     values.update(overrides)
-    values["source_priority"] = _normalize_priority(values["source_priority"])
+
+    # Old releases allowed SoundCloud in fallback order and Qobuz quality 5
+    # (MP3 320). Keep those files readable, but make the effective runtime
+    # configuration lossless without rewriting user state implicitly.
+    priority = _normalize_priority(values["source_priority"], allow_legacy=True)
+    values["source_priority"] = tuple(
+        source for source in priority if source in DEFAULT_SOURCE_PRIORITY
+    )
+    if not values["source_priority"]:
+        values["source_priority"] = DEFAULT_SOURCE_PRIORITY
+    if values["qobuz_quality"] == 5:
+        values["qobuz_quality"] = 6
     return UserConfig(**values)
 
 
@@ -130,7 +159,7 @@ def set_user_config(home: Path, key: str, value: object) -> UserConfig:
     normalized = key.strip().lower().replace("-", "_")
     path = config_path(home)
     overrides = _read_overrides(path)
-    overrides[normalized] = validate_value(normalized, value)
+    overrides[normalized] = _validate_runtime_value(normalized, value)
     _write_overrides(path, overrides)
     return load_user_config(home)
 
