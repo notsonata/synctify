@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 DEFAULT_SOURCE_PRIORITY = ("qobuz", "tidal", "deezer", "soundcloud")
-QOBUZ_QUALITIES = frozenset({5, 6, 7, 27})
+QOBUZ_QUALITIES = frozenset({6, 7, 27})
 STREAMRIP_QUALITIES = frozenset({0, 1, 2, 3, 4})
 
 
@@ -190,3 +190,18 @@ def resolve_streamrip_quality(config: UserConfig, source: str, cli_value: int | 
     if env is not None:
         return _quality(env, STREAMRIP_QUALITIES, "streamrip quality")
     return config.streamrip_quality_for(normalized)
+
+
+def effective_user_config(config: UserConfig) -> UserConfig:
+    """Resolve environment-overridden values using normal runtime precedence."""
+    return UserConfig(
+        source_priority=resolve_source_priority(config),
+        qobuz_dl=resolve_qobuz_dl(config),
+        streamrip=resolve_streamrip(config),
+        rclone=resolve_rclone(config),
+        qobuz_quality=resolve_qobuz_quality(config),
+        streamrip_qobuz_quality=resolve_streamrip_quality(config, "qobuz"),
+        streamrip_tidal_quality=resolve_streamrip_quality(config, "tidal"),
+        streamrip_deezer_quality=resolve_streamrip_quality(config, "deezer"),
+        streamrip_soundcloud_quality=resolve_streamrip_quality(config, "soundcloud"),
+    )
