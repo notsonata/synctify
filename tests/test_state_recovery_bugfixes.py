@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from synctify.config import Settings
-from synctify.db import connect
+from synctify.db import connect, initialize
 from synctify.doctor import CheckStatus, DoctorCheck, DoctorReport
 from synctify.migration import MigrationError, MigrationOptions, run_migration
 from synctify.migration_checkpoint import (
@@ -17,13 +18,13 @@ from synctify.migration_checkpoint import (
     STAGE_SPOTIFY_REFRESH,
     MigrationCheckpointError,
     checkpoint_path,
-    load_checkpoint,
     mark_stage_completed,
     migration_identity,
     new_checkpoint,
     record_stage_error,
     save_checkpoint,
 )
+from synctify.migration_cli import app
 from synctify.playlists import build_playlists
 from synctify.spotify.ingest import SpotifySnapshot
 
@@ -164,6 +165,36 @@ def test_resume_skips_completed_relink_when_source_drive_is_disconnected(
     assert resumed.checkpoint.complete is True
 
 
+def test_cli_resume_preview_accepts_disconnected_completed_relink_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    portable = tmp_path / "portable.json"
+    source = tmp_path / "unplugged-drive" / "library"
+    home = tmp_path / "home"
+    _portable(portable)
+    checkpoint = new_checkpoint(
+        migration_identity(
+            portable,
+            library_source=source,
+            relink_limit=None,
+            allow_partial=False,
+        )
+    )
+    mark_stage_completed(checkpoint, STAGE_LIBRARY_RELINK)
+    save_checkpoint(checkpoint_path(home), checkpoint)
+    monkeypatch.setenv("SYNCTIFY_HOME", str(home))
+
+    result = CliRunner().invoke(
+        app,
+        ["migrate", str(portable), "--library", str(source), "--resume"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Mode: preview" in result.output
+    assert "library-relink" in result.output
+
+
 def test_failed_owned_playlist_delete_keeps_ownership_for_retry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -174,8 +205,6 @@ def test_failed_owned_playlist_delete_keeps_ownership_for_retry(
     track = library / "Track.flac"
     track.parent.mkdir(parents=True)
     track.write_bytes(b"flac")
-
-    from synctify.db import initialize
 
     initialize(database)
     with connect(database) as connection:
@@ -192,6 +221,7 @@ def test_failed_owned_playlist_delete_keeps_ownership_for_retry(
             ("playlist-1", "track-1"),
         )
         first = build_playlists(connection, playlists)
+        connection.execute("DELETE FROM playlist_tracks WHERE playlist_id = 'playlist-1'")
         connection.execute("DELETE FROM playlists WHERE spotify_id = 'playlist-1'")
 
     output = first.results[0].output
@@ -217,5 +247,3 @@ def test_failed_owned_playlist_delete_keeps_ownership_for_retry(
     assert output.is_file()
     assert ownership is not None
     assert ownership["filename"] == output.name
-    saved = load_checkpoint(checkpoint_path(settings.home)) if False else None
-    assert saved is None
