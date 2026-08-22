@@ -43,6 +43,18 @@ jobs:
           .venv-release/bin/synctify --help >/dev/null
           .venv-release/bin/synctify tui --help >/dev/null
           VERSION="$VERSION" .venv-release/bin/python -c 'import os, synctify; assert synctify.__version__ == os.environ["VERSION"]'
+      - name: Build macOS distribution bundle
+        run: python scripts/build_distribution.py --dist-dir dist
+      - name: Smoke test macOS distribution bundle
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUNDLE="synctify-${VERSION}-macos"
+          rm -rf .dist-release
+          mkdir .dist-release
+          unzip -q "dist/${BUNDLE}.zip" -d .dist-release
+          test -x ".dist-release/${BUNDLE}/synctify.sh"
+          SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" --help >/dev/null
+          SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" tui --help >/dev/null
       - name: Generate checksums
         run: |
           cd dist
