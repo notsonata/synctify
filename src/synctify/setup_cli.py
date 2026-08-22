@@ -5,7 +5,7 @@ from pathlib import Path
 import typer
 
 from .config import Settings
-from .entrypoint import app
+from .resolution_cli import app
 from .setup import (
     SetupError,
     SetupOptions,
