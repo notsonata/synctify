@@ -57,6 +57,9 @@ def test_release_workflow_builds_and_publishes_verified_artifacts() -> None:
     assert 'BUNDLE="synctify-${VERSION}-macos"' in workflow
     assert '"dist/${BUNDLE}.zip"' in workflow
     assert '".dist-release/${BUNDLE}/synctify.sh" --help' in workflow
-    assert "shasum -a 256 * > SHA256SUMS" in workflow
-    assert 'gh release create "$GITHUB_REF_NAME" dist/*' in workflow
+    assert '"dist/synctify-${VERSION}.tar.gz"' in workflow
+    assert 'gh release create "$GITHUB_REF_NAME" \\' in workflow
+    assert 'gh release create "$GITHUB_REF_NAME" dist/*' not in workflow
+    assert "SHA256SUMS" not in workflow
+    assert '"dist/synctify-${VERSION}-py3-none-any.whl"' not in workflow
     assert "--notes-file release-notes.md" in workflow
