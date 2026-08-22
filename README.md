@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.21.0**
+**Current version: 0.22.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -34,6 +34,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 - portable setup metadata export/import for migration between Macs
 - migration relink/copy of an existing FLAC library without redownloading matched tracks
 - coordinated migration bootstrap through `synctify migrate`
+- resumable migration checkpoints with completed-stage skipping
 - SQLite state database with migrations
 - top-level read-only setup diagnostics through `synctify doctor`
 - persistent defaults for source priority, downloader quality, and executable paths
@@ -209,7 +210,7 @@ synctify migrate synctify-portable.json \
   --library /Volumes/MusicBackup/MyLibrary
 ```
 
-Preview validates the portable bundle, target conflicts, optional library source, and planned stages. It does not create the Synctify home, contact Spotify, copy FLACs, or change SQLite.
+Preview validates the portable bundle, target conflicts, optional library source, checkpoint compatibility, and planned stages. It does not create the Synctify home, contact Spotify, copy FLACs, or change SQLite.
 
 Apply the migration explicitly:
 
@@ -230,12 +231,49 @@ The apply workflow runs in this order:
 6. run a read-only library audit
 7. run `doctor`-equivalent final diagnostics
 
+Every successfully completed stage is checkpointed atomically in:
+
+```text
+<SYNCTIFY_HOME>/migration-checkpoint.json
+```
+
+If a migration is interrupted or a stage fails, rerun the same command with `--resume`:
+
+```bash
+synctify migrate synctify-portable.json \
+  --library /Volumes/MusicBackup/MyLibrary \
+  --resume \
+  --apply
+```
+
+Completed stages are skipped. A relink stage that finished its scan is checkpointed even when individual tracks reported relink failures, so an unrelated later failure does not force another potentially expensive full-library scan. Audit or doctor stages that report operational failures remain pending and are retried on resume.
+
+Resume identity is based on:
+
+- SHA-256 of the portable JSON contents
+- resolved `--library` path, when supplied
+- `--relink-limit`
+- `--allow-partial`
+
+Changing any of those inputs invalidates resume. `--spotify-login` is intentionally not part of the identity, which means an authentication failure can be resumed by adding `--spotify-login` on the next attempt.
+
+An incomplete checkpoint blocks a normal `--apply` to avoid accidentally repeating completed work. Use `--resume` to continue it, or explicitly discard it and rerun every stage with:
+
+```bash
+synctify migrate synctify-portable.json \
+  --library /Volumes/MusicBackup/MyLibrary \
+  --restart \
+  --apply
+```
+
 If a valid Spotify token is already present, omit `--spotify-login`. A Spotify login/pull failure stops the later desired-state-dependent stages. Once desired state has been restored, per-track relink failures are retained in the final report and the playlist/audit/doctor stages still run so the remaining migration gaps are visible.
 
 Useful controls:
 
 ```bash
 synctify migrate synctify-portable.json --apply
+synctify migrate synctify-portable.json --resume --apply
+synctify migrate synctify-portable.json --restart --apply
 synctify migrate synctify-portable.json --library /path/to/flacs --apply
 synctify migrate synctify-portable.json --library /path/to/flacs --relink-limit 100 --apply
 synctify migrate synctify-portable.json --library /path/to/flacs --allow-partial --apply
