@@ -3,15 +3,28 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from synctify.config import Settings
 from synctify.db import connect
 from synctify.doctor import CheckStatus, DoctorCheck, DoctorReport
 from synctify.migration import (
+    MigrationError,
     MigrationOptions,
     preview_migration,
     run_migration,
+)
+from synctify.migration_checkpoint import (
+    STAGE_AUDIT,
+    STAGE_DOCTOR,
+    STAGE_LIBRARY_RELINK,
+    STAGE_PLAYLISTS,
+    STAGE_PORTABLE_IMPORT,
+    STAGE_SPOTIFY_LOGIN,
+    STAGE_SPOTIFY_REFRESH,
+    checkpoint_path,
+    load_checkpoint,
 )
 from synctify.migration_cli import app
 from synctify.spotify.ingest import PlaylistEntry, SpotifyPlaylist, SpotifySnapshot, SpotifyTrack
@@ -36,7 +49,7 @@ def _portable(path: Path) -> None:
             {
                 "format": "synctify-portable",
                 "format_version": 1,
-                "synctify_version": "0.20.0",
+                "synctify_version": "0.21.0",
                 "config": {"source_priority": ["qobuz", "tidal"]},
                 "spotify": {
                     "client_id": "migration-client",
@@ -73,6 +86,14 @@ def _doctor(_: Settings) -> DoctorReport:
     return DoctorReport(
         (
             DoctorCheck("migration", "test", CheckStatus.PASS, "ok"),
+        )
+    )
+
+
+def _failing_doctor(_: Settings) -> DoctorReport:
+    return DoctorReport(
+        (
+            DoctorCheck("migration", "test", CheckStatus.FAIL, "not ready"),
         )
     )
 
@@ -153,6 +174,8 @@ def test_apply_restores_desired_state_and_runs_final_checks(tmp_path: Path) -> N
     assert report.audit is not None
     assert report.doctor is not None
     assert report.operational_failures == 0
+    assert report.checkpoint is not None
+    assert report.checkpoint.complete is True
     assert settings.spotify_config_path.exists()
     assert settings.library_dir.is_dir()
     with connect(settings.database_path) as connection:
@@ -196,6 +219,8 @@ def test_apply_with_external_library_relinks_then_builds_playlist(tmp_path: Path
     assert report.audit is not None
     assert not report.audit.failures
     assert not report.audit.untracked_files
+    assert report.checkpoint is not None
+    assert report.checkpoint.complete is True
 
 
 def test_spotify_login_runs_after_public_config_import_and_before_fetch(tmp_path: Path) -> None:
@@ -213,7 +238,7 @@ def test_spotify_login_runs_after_public_config_import_and_before_fetch(tmp_path
         events.append("fetch")
         return _snapshot()
 
-    run_migration(
+    report = run_migration(
         settings,
         MigrationOptions(portable, spotify_login=True),
         spotify_login_fn=login,
@@ -222,6 +247,172 @@ def test_spotify_login_runs_after_public_config_import_and_before_fetch(tmp_path
     )
 
     assert events == ["login", "fetch"]
+    assert report.checkpoint is not None
+    assert report.checkpoint.is_completed(STAGE_SPOTIFY_LOGIN)
+
+
+def test_spotify_failure_checkpoint_resumes_after_import_with_login_added(tmp_path: Path) -> None:
+    home = tmp_path / "new-mac"
+    portable = tmp_path / "portable.json"
+    _portable(portable)
+    settings = _settings(home)
+
+    def fail_fetch(_: Settings) -> SpotifySnapshot:
+        raise RuntimeError("authentication required")
+
+    with pytest.raises(MigrationError, match="Spotify migration stage failed"):
+        run_migration(
+            settings,
+            MigrationOptions(portable),
+            fetch_snapshot_fn=fail_fetch,
+            doctor_fn=_doctor,
+        )
+
+    saved = load_checkpoint(checkpoint_path(home))
+    assert saved is not None
+    assert saved.is_completed(STAGE_PORTABLE_IMPORT)
+    assert not saved.is_completed(STAGE_SPOTIFY_REFRESH)
+    assert saved.last_error_stage == STAGE_SPOTIFY_REFRESH
+
+    events: list[str] = []
+
+    def login(_: Settings) -> None:
+        events.append("login")
+
+    def fetch(_: Settings) -> SpotifySnapshot:
+        events.append("fetch")
+        return _snapshot()
+
+    report = run_migration(
+        settings,
+        MigrationOptions(portable, spotify_login=True, resume=True),
+        spotify_login_fn=login,
+        fetch_snapshot_fn=fetch,
+        doctor_fn=_doctor,
+    )
+
+    assert STAGE_PORTABLE_IMPORT in report.resumed_stages
+    assert events == ["login", "fetch"]
+    assert report.checkpoint is not None
+    assert report.checkpoint.is_completed(STAGE_SPOTIFY_LOGIN)
+    assert report.checkpoint.complete is True
+
+
+def test_resume_skips_completed_relink_and_retries_failed_doctor(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "new-mac"
+    portable = tmp_path / "portable.json"
+    source = tmp_path / "copied-library"
+    source_flac = source / "Radiohead" / "OK Computer" / "06 - Paranoid Android.flac"
+    _portable(portable)
+    _write_flac(source_flac)
+    settings = _settings(home)
+    options = MigrationOptions(portable, library_source=source)
+
+    first = run_migration(
+        settings,
+        options,
+        fetch_snapshot_fn=lambda _: _snapshot(),
+        doctor_fn=_failing_doctor,
+    )
+
+    assert first.checkpoint is not None
+    assert first.checkpoint.is_completed(STAGE_LIBRARY_RELINK)
+    assert first.checkpoint.is_completed(STAGE_PLAYLISTS)
+    assert first.checkpoint.is_completed(STAGE_AUDIT)
+    assert not first.checkpoint.is_completed(STAGE_DOCTOR)
+    assert first.checkpoint.complete is False
+    assert first.operational_failures == 1
+
+    import synctify.migration as migration_module
+
+    def should_not_fetch(_: Settings) -> SpotifySnapshot:
+        raise AssertionError("Spotify refresh should have been resumed from checkpoint")
+
+    def should_not_relink(*args, **kwargs):
+        raise AssertionError("relink should have been resumed from checkpoint")
+
+    monkeypatch.setattr(migration_module, "relink_library", should_not_relink)
+
+    resumed = run_migration(
+        settings,
+        MigrationOptions(portable, library_source=source, resume=True),
+        fetch_snapshot_fn=should_not_fetch,
+        doctor_fn=_doctor,
+    )
+
+    assert STAGE_SPOTIFY_REFRESH in resumed.resumed_stages
+    assert STAGE_LIBRARY_RELINK in resumed.resumed_stages
+    assert STAGE_PLAYLISTS in resumed.resumed_stages
+    assert STAGE_AUDIT in resumed.resumed_stages
+    assert STAGE_DOCTOR not in resumed.resumed_stages
+    assert resumed.doctor is not None
+    assert resumed.doctor.failures == 0
+    assert resumed.checkpoint is not None
+    assert resumed.checkpoint.complete is True
+    assert resumed.operational_failures == 0
+
+
+def test_resume_rejects_changed_portable_bundle(tmp_path: Path) -> None:
+    home = tmp_path / "new-mac"
+    portable = tmp_path / "portable.json"
+    _portable(portable)
+    settings = _settings(home)
+
+    with pytest.raises(MigrationError):
+        run_migration(
+            settings,
+            MigrationOptions(portable),
+            fetch_snapshot_fn=lambda _: (_ for _ in ()).throw(RuntimeError("stop")),
+            doctor_fn=_doctor,
+        )
+
+    data = json.loads(portable.read_text(encoding="utf-8"))
+    data["config"]["source_priority"] = ["tidal"]
+    portable.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(MigrationError, match="checkpoint does not match"):
+        run_migration(
+            settings,
+            MigrationOptions(portable, resume=True),
+            fetch_snapshot_fn=lambda _: _snapshot(),
+            doctor_fn=_doctor,
+        )
+
+
+def test_incomplete_checkpoint_requires_resume_or_restart(tmp_path: Path) -> None:
+    home = tmp_path / "new-mac"
+    portable = tmp_path / "portable.json"
+    _portable(portable)
+    settings = _settings(home)
+
+    with pytest.raises(MigrationError):
+        run_migration(
+            settings,
+            MigrationOptions(portable),
+            fetch_snapshot_fn=lambda _: (_ for _ in ()).throw(RuntimeError("stop")),
+            doctor_fn=_doctor,
+        )
+
+    with pytest.raises(MigrationError, match="incomplete migration checkpoint"):
+        run_migration(
+            settings,
+            MigrationOptions(portable),
+            fetch_snapshot_fn=lambda _: _snapshot(),
+            doctor_fn=_doctor,
+        )
+
+    restarted = run_migration(
+        settings,
+        MigrationOptions(portable, restart=True),
+        fetch_snapshot_fn=lambda _: _snapshot(),
+        doctor_fn=_doctor,
+    )
+    assert restarted.checkpoint is not None
+    assert restarted.checkpoint.complete is True
+    assert restarted.resumed_stages == ()
 
 
 def test_cli_preview_lists_stages_without_creating_home(tmp_path: Path, monkeypatch) -> None:
@@ -237,3 +428,26 @@ def test_cli_preview_lists_stages_without_creating_home(tmp_path: Path, monkeypa
     assert "Planned stages" in result.stdout
     assert "No local state was changed" in result.stdout
     assert not home.exists()
+
+
+def test_cli_resume_preview_shows_completed_checkpoint_stages(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "new-mac"
+    portable = tmp_path / "portable.json"
+    _portable(portable)
+    settings = _settings(home)
+
+    with pytest.raises(MigrationError):
+        run_migration(
+            settings,
+            MigrationOptions(portable),
+            fetch_snapshot_fn=lambda _: (_ for _ in ()).throw(RuntimeError("stop")),
+            doctor_fn=_doctor,
+        )
+
+    monkeypatch.setenv("SYNCTIFY_HOME", str(home))
+    result = runner.invoke(app, ["migrate", str(portable), "--resume"])
+
+    assert result.exit_code == 0
+    assert "Completed stages: portable-import" in result.stdout
+    assert "Resumed/skipped: portable-import" in result.stdout
+    assert "will be skipped" in result.stdout
