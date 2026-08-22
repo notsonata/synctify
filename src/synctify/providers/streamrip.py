@@ -13,7 +13,9 @@ from .base import AcquiredTrack
 from .reconcile import find_existing_flac, output_reports_existing_file
 
 STREAMRIP_REPOSITORY = "https://github.com/nathom/streamrip"
-STREAMRIP_SOURCES = frozenset({"qobuz", "tidal", "deezer", "soundcloud"})
+# Synctify persists only canonical FLAC audio. Streamrip also supports sources
+# such as SoundCloud, but those do not provide a lossless FLAC acquisition path.
+STREAMRIP_SOURCES = frozenset({"qobuz", "tidal", "deezer"})
 
 
 class StreamripUnavailableError(RuntimeError):
@@ -35,7 +37,7 @@ class StreamripConfig:
 
 
 class StreamripProvider:
-    """Out-of-process Streamrip downloader for supported source services."""
+    """Out-of-process Streamrip downloader for Synctify's lossless sources."""
 
     name = "streamrip"
     supported_sources = STREAMRIP_SOURCES
@@ -81,7 +83,7 @@ class StreamripProvider:
         if not self.supports(source):
             supported = ", ".join(sorted(self.supported_sources))
             raise ValueError(
-                f"streamrip source {candidate.provider!r} is unsupported; choose one of: {supported}"
+                f"streamrip source {candidate.provider!r} is unsupported for Synctify's canonical FLAC library; choose one of: {supported}"
             )
 
         self.require_available()
