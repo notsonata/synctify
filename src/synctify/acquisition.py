@@ -69,6 +69,15 @@ class AcquisitionReport:
         return len(self.failures)
 
 
+def _recorded_file_is_usable(raw_path: str | None) -> bool:
+    if not raw_path:
+        return False
+    try:
+        return Path(raw_path).expanduser().is_file()
+    except OSError:
+        return False
+
+
 def pending_acquisitions(
     connection: sqlite3.Connection,
     *,
@@ -91,11 +100,11 @@ def pending_acquisitions(
             t.artist,
             t.album,
             t.isrc,
-            t.duration_ms
+            t.duration_ms,
+            t.local_path
         FROM track_resolutions AS r
         JOIN tracks AS t ON t.spotify_id = r.spotify_id
-        WHERE (t.local_path IS NULL OR t.local_path = '')
-          AND EXISTS (
+        WHERE EXISTS (
               SELECT 1
               FROM playlist_tracks AS pt
               WHERE pt.track_id = t.spotify_id
@@ -118,6 +127,7 @@ def pending_acquisitions(
             duration_ms=row["duration_ms"],
         )
         for row in rows
+        if not _recorded_file_is_usable(row["local_path"])
     )
     return tasks if limit is None else tasks[:limit]
 

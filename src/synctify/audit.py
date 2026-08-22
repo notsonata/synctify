@@ -209,7 +209,7 @@ def audit_library(
     issues: list[RecordedIssue] = []
     failures: list[AuditFailure] = []
     recorded_existing: set[Path] = set()
-    missing_ids: set[str] = set()
+    clearable_ids: set[str] = set()
     target_ids: set[str] = set()
 
     for row in rows:
@@ -260,7 +260,7 @@ def audit_library(
                     message="recorded local file is missing",
                 )
             )
-            missing_ids.add(row["spotify_id"])
+            clearable_ids.add(row["spotify_id"])
             if row["referenced"]:
                 target_ids.add(row["spotify_id"])
             continue
@@ -276,6 +276,9 @@ def audit_library(
                     message="recorded local path is not a regular file",
                 )
             )
+            clearable_ids.add(row["spotify_id"])
+            if row["referenced"]:
+                target_ids.add(row["spotify_id"])
             continue
 
         recorded_existing.add(path)
@@ -355,12 +358,22 @@ def audit_library(
             except OSError as exc:
                 failures.append(AuditFailure(adoption.spotify_id, adoption.path, str(exc)))
 
-        for spotify_id in sorted(missing_ids):
+        for spotify_id in sorted(clearable_ids):
             if spotify_id in adoption_by_track:
                 continue
             row = by_id[spotify_id]
+            issue_kind = next(
+                (
+                    issue.kind
+                    for issue in issues
+                    if issue.spotify_id == spotify_id
+                    and issue.kind in {AuditIssueKind.MISSING, AuditIssueKind.NOT_FILE}
+                ),
+                AuditIssueKind.MISSING,
+            )
             _clear_local_state(connection, row)
-            repairs.append(AuditRepair("cleared-missing", spotify_id))
+            action = "cleared-missing" if issue_kind is AuditIssueKind.MISSING else "cleared-not-file"
+            repairs.append(AuditRepair(action, spotify_id))
 
         for issue in issues:
             if issue.kind not in {AuditIssueKind.HASH_MISSING, AuditIssueKind.HASH_MISMATCH}:
