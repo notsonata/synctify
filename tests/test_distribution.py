@@ -145,8 +145,9 @@ def test_bundle_readme_explains_state_and_external_tool_boundaries() -> None:
     assert "./synctify.sh" in text
     assert "./synctify.sh install" in text
     assert "~/.local/bin/synctify" in text
-    assert "synctify self-update" in text
-    assert "Update now?" in text
+    assert "synctify upgrade" in text
+    assert "synctify self-update" not in text
+    assert "Upgrade now?" in text
     assert "Python 3.12 or newer" in text
     assert "not bundled with Synctify" in text
     assert "database, configuration, canonical music library, and playlists are NOT stored" in text
