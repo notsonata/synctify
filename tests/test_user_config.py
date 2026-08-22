@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 import synctify.entrypoint as entrypoint
+from synctify.config import Settings
 from synctify.entrypoint import app
 from synctify.providers.qobuz import QobuzDLProvider
 from synctify.providers.streamrip import StreamripProvider
@@ -15,6 +16,7 @@ from synctify.user_config import (
     UserConfigError,
     config_path,
     load_user_config,
+    resolve_library_dir,
     resolve_qobuz_dl,
     resolve_qobuz_quality,
     resolve_rclone,
@@ -35,6 +37,7 @@ def test_missing_config_uses_built_in_defaults(tmp_path: Path) -> None:
     assert config.rclone == "rclone"
     assert config.qobuz_quality == 27
     assert config.streamrip_quality_for("tidal") == 3
+    assert config.library_dir is None
     assert config_path(tmp_path).exists() is False
 
 
@@ -64,6 +67,8 @@ def test_invalid_config_values_are_rejected(tmp_path: Path) -> None:
         set_user_config(tmp_path, "qobuz-quality", "5")
     with pytest.raises(UserConfigError, match="must be one of"):
         set_user_config(tmp_path, "qobuz-quality", "4")
+    with pytest.raises(UserConfigError, match="absolute path"):
+        set_user_config(tmp_path, "library-dir", "relative/music")
     with pytest.raises(UserConfigError, match="unknown config key"):
         set_user_config(tmp_path, "nope", "value")
 
@@ -87,6 +92,28 @@ def test_legacy_lossy_settings_remain_readable_but_resolve_losslessly(tmp_path: 
     raw = json.loads(config_path(tmp_path).read_text(encoding="utf-8"))
     assert raw["source_priority"] == ["soundcloud", "qobuz", "tidal"]
     assert raw["qobuz_quality"] == 5
+
+
+def test_library_directory_precedence_and_settings_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    saved = tmp_path / "saved-library"
+    environment = tmp_path / "environment-library"
+    explicit = tmp_path / "explicit-library"
+    config = set_user_config(home, "library-dir", str(saved))
+
+    assert resolve_library_dir(config, home) == saved
+    assert resolve_library_dir(config, home, explicit) == explicit
+
+    monkeypatch.setenv("SYNCTIFY_LIBRARY_DIR", str(environment))
+    assert resolve_library_dir(config, home) == environment
+    monkeypatch.setenv("SYNCTIFY_HOME", str(home))
+    assert Settings.default().library_dir == environment
+
+    monkeypatch.delenv("SYNCTIFY_LIBRARY_DIR")
+    assert Settings.default().library_dir == saved
 
 
 def test_precedence_cli_then_environment_then_saved_then_builtin(
@@ -140,14 +167,26 @@ def test_config_cli_set_show_and_unset(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert result.exit_code == 0
     assert "source-priority: tidal,qobuz" in result.stdout
 
+    library = tmp_path / "Music"
+    result = runner.invoke(app, ["config", "set", "library-dir", str(library)])
+    assert result.exit_code == 0
+    assert f"library-dir: {library}" in result.stdout
+    assert Settings.default().library_dir == library
+
     result = runner.invoke(app, ["config", "show"])
     assert result.exit_code == 0
     assert str(config_path(tmp_path)) in result.stdout
     assert "source-priority: tidal,qobuz" in result.stdout
+    assert f"library-dir: {library}" in result.stdout
 
     result = runner.invoke(app, ["config", "unset", "source-priority"])
     assert result.exit_code == 0
     assert "source-priority: qobuz,tidal,deezer" in result.stdout
+
+    result = runner.invoke(app, ["config", "unset", "library-dir"])
+    assert result.exit_code == 0
+    assert f"library-dir: {tmp_path / 'library'}" in result.stdout
+    assert Settings.default().library_dir == tmp_path / "library"
 
 
 def test_configured_acquire_passes_saved_defaults_to_existing_command(
