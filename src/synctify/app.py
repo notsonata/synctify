@@ -39,8 +39,8 @@ from .entrypoint import (
     configured_status,
     configured_streamrip_doctor,
     configured_sync,
-    configured_update,
 )
+from .library_update_cli import configured_update
 from .migration_cli import migrate_command
 from .portable_cli import export_command, import_command
 from .relink_cli import relink_command
