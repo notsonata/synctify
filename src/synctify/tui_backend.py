@@ -14,16 +14,14 @@ from .audit import LibraryAuditReport, audit_library
 from .config import Settings
 from .db import connect, initialize
 from .doctor import DoctorReport, run_doctor
-from .gc import clean_unreferenced_tracks
-from .playlists import build_playlists
 from .resolution import set_manual_override
 from .spotify.auth import SpotifyAuth, SpotifyOAuthConfig
+from .spotify.cleanup import apply_reviewed_playlist, unimport_reviewed_playlist
 from .spotify.client import SpotifyClient
 from .spotify.selection import (
     PlaylistCatalogEntry,
     PlaylistItemState,
     SpotifySelectionCancelled,
-    apply_playlist_choices,
     confirm_playlist,
     fetch_one_playlist,
     fetch_playlist_catalog,
@@ -32,7 +30,6 @@ from .spotify.selection import (
     refresh_playlist_items,
     set_item_choice,
     store_playlist_catalog,
-    unimport_playlist,
     update_tracked_playlists,
 )
 from .user_config import effective_user_config, load_user_config
@@ -365,14 +362,17 @@ def apply_spotify_playlist(
     playlist_id: str,
 ) -> None:
     with connect(settings.database_path) as connection:
-        apply_playlist_choices(connection, playlist_id)
-        clean_unreferenced_tracks(connection, settings.library_dir, apply=True)
-        build_playlists(connection, settings.playlists_dir, allow_partial=True)
+        apply_reviewed_playlist(
+            connection,
+            playlist_id,
+            settings.library_dir,
+            settings.playlists_dir,
+        )
 
 
 def unimport_spotify_playlist(settings: Settings, playlist_id: str) -> None:
     with connect(settings.database_path) as connection:
-        unimport_playlist(
+        unimport_reviewed_playlist(
             connection,
             playlist_id,
             settings.library_dir,
