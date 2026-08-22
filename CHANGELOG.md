@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.1.0 - 2026-08-23
+
+Synctify 1.1.0 turns the Textual TUI into an operational frontend for the existing CLI workflows instead of limiting it to local state and diagnostics.
+
+### TUI command center
+
+- add an `Import Spotify` dashboard action for the existing `synctify spotify pull` desired-state import
+- add a `Full Update` action for the coordinated Spotify, resolution, acquisition, and playlist workflow
+- add keyboard shortcuts `i` for Spotify import and `u` for full update
+- add a fifth Commands tab with quick actions for Spotify import, full update, automatic resolution, playlist building, and target listing
+- add a command input for non-interactive Synctify commands such as acquisition, sync, backup, and config operations
+- stream merged CLI stdout/stderr into the TUI while keeping command execution off the UI thread
+- preserve the active Synctify home and canonical library path for child commands
+- reload normal TUI settings after commands so `config set library-dir` and `config unset library-dir` take effect without restarting
+- render child output as literal text instead of Rich markup so bracketed progress labels and filenames are not interpreted as formatting
+- terminate and reap a child command if output handling aborts while the TUI is shutting down
+- keep recursive TUI launches blocked and keep prompt-driven commands in Terminal
+
+### Release integration
+
+- retain the 1.0.6 coordinated-update progress reporting when rebasing the TUI work onto current `main`
+- add regression coverage for command composition, streamed output, process cleanup, settings propagation, and Commands-tab navigation
+
+No SQLite schema migration is required for this release.
+
 ## 1.0.6 - 2026-08-23
 
 Synctify 1.0.6 makes coordinated updates visibly report what they are doing instead of appearing frozen during long Spotify and Streamrip operations.
