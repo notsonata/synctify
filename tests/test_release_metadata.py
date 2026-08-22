@@ -130,7 +130,7 @@ def test_readme_documents_schema_v7_review_migration() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "schema v7" in readme
-    assert "previously included items become pending additions" in readme
+    assert "Previously included items become pending additions" in readme
     assert "does not delete track rows, local FLAC files" in readme
 
 
