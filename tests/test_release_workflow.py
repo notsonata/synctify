@@ -26,6 +26,7 @@ def test_current_stable_release_metadata_is_self_consistent() -> None:
     assert version == "1.0.0"
     assert "first stable release" in notes
     assert "### Safety and correctness" in notes
+    assert "### Interactive TUI" in notes
 
 
 def test_mismatched_release_tag_is_rejected() -> None:
@@ -52,6 +53,7 @@ def test_release_workflow_builds_and_publishes_verified_artifacts() -> None:
     assert "python -m build" in workflow
     assert "python -m twine check dist/*" in workflow
     assert ".venv-release/bin/synctify --help" in workflow
+    assert ".venv-release/bin/synctify tui --help" in workflow
     assert "shasum -a 256 * > SHA256SUMS" in workflow
     assert 'gh release create "$GITHUB_REF_NAME" dist/*' in workflow
     assert "--notes-file release-notes.md" in workflow
