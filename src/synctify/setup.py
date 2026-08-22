@@ -11,7 +11,12 @@ from .config import Settings
 from .db import connect, initialize
 from .spotify.auth import DEFAULT_REDIRECT_URI, SpotifyOAuthConfig, resolve_config
 from .sync import SyncMode, SyncTarget, add_filesystem_target
-from .user_config import UserConfig, load_user_config, set_user_config
+from .user_config import (
+    UserConfig,
+    load_user_config,
+    resolve_library_dir,
+    set_user_config,
+)
 
 Which = Callable[[str], str | None]
 
@@ -37,6 +42,7 @@ class SetupOptions:
     mirror_destination: Path | None = None
     backup_name: str | None = None
     backup_destination: str | None = None
+    library_dir: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -79,6 +85,7 @@ def _apply_config(settings: Settings, options: SetupOptions) -> UserConfig:
         ("streamrip_tidal_quality", options.streamrip_tidal_quality),
         ("streamrip_deezer_quality", options.streamrip_deezer_quality),
         ("streamrip_soundcloud_quality", options.streamrip_soundcloud_quality),
+        ("library_dir", options.library_dir),
     )
     for key, value in values:
         if value is not None:
@@ -256,14 +263,25 @@ def run_setup(
     """Initialize Synctify and persist first-run configuration without network access."""
     # Validate target syntax before creating the home directory, database, or config.
     _validate_target_options(options)
-    settings.ensure_directories()
-    initialize(settings.database_path)
     config = _apply_config(settings, options)
-    spotify_configured = _configure_spotify(settings, options)
-    targets = _configure_targets(settings, options)
+    effective_settings = Settings(
+        home=settings.home,
+        library_dir=resolve_library_dir(
+            config,
+            settings.home,
+            default=settings.library_dir,
+        ),
+        playlists_dir=settings.playlists_dir,
+        database_path=settings.database_path,
+        spotify_config_path=settings.spotify_config_path,
+    )
+    effective_settings.ensure_directories()
+    initialize(effective_settings.database_path)
+    spotify_configured = _configure_spotify(effective_settings, options)
+    targets = _configure_targets(effective_settings, options)
     tools = _tool_checks(config, which)
     return SetupReport(
-        settings=settings,
+        settings=effective_settings,
         config=config,
         spotify_configured=spotify_configured,
         tools=tools,
