@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 
 from .acquisition import pending_acquisitions
 from .audit import LibraryAuditReport, audit_library
@@ -34,6 +38,12 @@ class UnresolvedTrack:
     artist: str
     album: str | None
     isrc: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class CommandResult:
+    args: tuple[str, ...]
+    returncode: int
 
 
 def _open_readonly(path: Path) -> sqlite3.Connection:
@@ -204,3 +214,41 @@ def read_audit_report(settings: Settings) -> LibraryAuditReport:
         raise RuntimeError("Synctify is not initialized")
     with _open_readonly(settings.database_path) as connection:
         return audit_library(connection, settings.library_dir, repair=False)
+
+
+def run_cli_command(
+    settings: Settings,
+    args: Sequence[str],
+    *,
+    on_output: Callable[[str], None] | None = None,
+) -> CommandResult:
+    """Run an existing Synctify CLI command and stream merged stdout/stderr lines."""
+    normalized = tuple(str(part) for part in args)
+    if not normalized:
+        raise ValueError("command arguments are required")
+    if normalized[0] == "tui":
+        raise ValueError("cannot launch a nested Synctify TUI")
+
+    environment = os.environ.copy()
+    environment["SYNCTIFY_HOME"] = str(settings.home)
+    environment["SYNCTIFY_SKIP_AUTO_UPDATE"] = "1"
+    environment["PYTHONUNBUFFERED"] = "1"
+
+    process = subprocess.Popen(
+        [sys.executable, "-m", "synctify.app", *normalized],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=environment,
+    )
+    if process.stdout is None:
+        raise RuntimeError("failed to capture Synctify command output")
+
+    for raw_line in process.stdout:
+        line = raw_line.rstrip("\r\n")
+        if on_output is not None:
+            on_output(line)
+
+    return CommandResult(args=normalized, returncode=process.wait())
