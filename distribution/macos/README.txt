@@ -62,15 +62,25 @@ Library update
 It does not fetch Spotify playlists or automatically accept new Spotify tracks.
 It resolves confirmed tracks, acquires missing FLACs, and rebuilds playlists.
 Long operations report their stage to stderr while the final structured report
-remains on stdout.
+remains on stdout. Resolution emits current/total progress and the current track.
+
+Tidal authentication is never started automatically from a Synctify batch. If
+Streamrip's saved Tidal session is missing or expired, Synctify skips Tidal once
+and continues to the next configured fallback instead of opening repeated login
+pages. Authenticate or refresh Tidal manually in Terminal first:
+
+   rip config --tidal
 
 TUI activity and cancellation
 -----------------------------
 
-Long-running TUI actions show a loading indicator and status message. Conflicting
-buttons are disabled while an action is running. Press Esc or choose Cancel (Esc)
-to cancel an active cancellable operation. The Spotify tab shows included,
-excluded, pending-addition, and pending-removal counts for each playlist.
+Long-running TUI actions show a loading indicator and status message. During
+automatic resolution, the bottom operation strip shows a determinate progress
+bar with source, current/total count, and current track. Starting Library Update
+from the dashboard stays on the current tab instead of forcing Commands open.
+Conflicting buttons are disabled while an action is running. Press Esc or choose
+Cancel (Esc) to cancel an active cancellable operation. The Spotify tab shows
+included, excluded, pending-addition, and pending-removal counts for each playlist.
 
 Application upgrades
 --------------------
@@ -83,7 +93,7 @@ Updating the Synctify application is separate from `synctify update`:
 Installed Synctify checks for a newer stable application release according to
 the configured auto-update policy. The default interactive prompt looks like:
 
-   Synctify application 1.2.1 is available (current: 1.2.0). Upgrade now? [Y/n]
+   Synctify application 1.2.2 is available (current: 1.2.1). Upgrade now? [Y/n]
 
 Upgrade policy:
 
