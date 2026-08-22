@@ -105,11 +105,13 @@ class UpdateWorkflowReport:
 
     @property
     def operational_failures(self) -> int:
-        return (
-            self.resolution_failures
-            + sum(group.failed for group in self.acquisitions)
-            + self.strict_playlist_failures
+        primary_failures = self.resolution_failures + sum(
+            group.failed for group in self.acquisitions
         )
+        # An acquisition/search failure commonly causes the same playlist to be
+        # incomplete. Preserve the primary failure count rather than double-counting
+        # that cascade, while still making a purely incomplete strict rebuild fail.
+        return primary_failures or self.strict_playlist_failures
 
 
 def normalize_source_priority(sources: str | Sequence[str]) -> tuple[str, ...]:
