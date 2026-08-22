@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -46,6 +46,42 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 
 CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track_id
 ON playlist_tracks(track_id);
+
+CREATE TABLE IF NOT EXISTS spotify_playlist_catalog (
+    spotify_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    snapshot_id TEXT,
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('liked', 'playlist')),
+    owner_id TEXT,
+    collaborative INTEGER NOT NULL DEFAULT 0,
+    track_count INTEGER,
+    tracked INTEGER NOT NULL DEFAULT 0,
+    available INTEGER NOT NULL DEFAULT 1,
+    fetched_at TEXT NOT NULL,
+    items_fetched_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_spotify_playlist_catalog_tracked
+ON spotify_playlist_catalog(tracked, name);
+
+CREATE TABLE IF NOT EXISTS spotify_playlist_items (
+    playlist_id TEXT NOT NULL REFERENCES spotify_playlist_catalog(spotify_id) ON DELETE CASCADE,
+    item_key TEXT NOT NULL,
+    track_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    added_at TEXT,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT,
+    duration_ms INTEGER,
+    isrc TEXT,
+    state TEXT NOT NULL CHECK (state IN ('included', 'excluded', 'pending_add', 'pending_remove')),
+    present INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (playlist_id, item_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spotify_playlist_items_state
+ON spotify_playlist_items(playlist_id, state, position);
 
 CREATE TABLE IF NOT EXISTS track_resolutions (
     spotify_id TEXT PRIMARY KEY REFERENCES tracks(spotify_id) ON DELETE CASCADE,
@@ -164,6 +200,85 @@ def _migrate(connection: sqlite3.Connection) -> None:
             filename TEXT NOT NULL UNIQUE,
             updated_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS spotify_playlist_catalog (
+            spotify_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            snapshot_id TEXT,
+            source_kind TEXT NOT NULL CHECK (source_kind IN ('liked', 'playlist')),
+            owner_id TEXT,
+            collaborative INTEGER NOT NULL DEFAULT 0,
+            track_count INTEGER,
+            tracked INTEGER NOT NULL DEFAULT 0,
+            available INTEGER NOT NULL DEFAULT 1,
+            fetched_at TEXT NOT NULL,
+            items_fetched_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_spotify_playlist_catalog_tracked
+        ON spotify_playlist_catalog(tracked, name);
+
+        CREATE TABLE IF NOT EXISTS spotify_playlist_items (
+            playlist_id TEXT NOT NULL REFERENCES spotify_playlist_catalog(spotify_id) ON DELETE CASCADE,
+            item_key TEXT NOT NULL,
+            track_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            added_at TEXT,
+            title TEXT NOT NULL,
+            artist TEXT NOT NULL,
+            album TEXT,
+            duration_ms INTEGER,
+            isrc TEXT,
+            state TEXT NOT NULL CHECK (state IN ('included', 'excluded', 'pending_add', 'pending_remove')),
+            present INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (playlist_id, item_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_spotify_playlist_items_state
+        ON spotify_playlist_items(playlist_id, state, position);
+        """
+    )
+
+    # Seed the catalog from older all-at-once Spotify imports so existing users can
+    # manage those playlists with the new selection flow without re-importing data.
+    now = "1970-01-01T00:00:00+00:00"
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO spotify_playlist_catalog(
+            spotify_id, name, snapshot_id, source_kind, owner_id, collaborative,
+            track_count, tracked, available, fetched_at, items_fetched_at
+        )
+        SELECT
+            p.spotify_id, p.name, p.snapshot_id, p.source_kind, p.owner_id,
+            p.collaborative, COUNT(pt.position), 1, 1,
+            COALESCE(p.last_checked_at, ?), p.last_checked_at
+        FROM playlists AS p
+        LEFT JOIN playlist_tracks AS pt ON pt.playlist_id = p.spotify_id
+        WHERE p.source_kind IN ('liked', 'playlist')
+        GROUP BY p.spotify_id
+        """,
+        (now,),
+    )
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO spotify_playlist_items(
+            playlist_id, item_key, track_id, position, added_at, title, artist,
+            album, duration_ms, isrc, state, present
+        )
+        SELECT
+            pt.playlist_id,
+            pt.track_id || ':' || COALESCE(pt.added_at, printf('%08d', pt.position)),
+            pt.track_id,
+            pt.position,
+            pt.added_at,
+            t.title,
+            t.artist,
+            t.album,
+            t.duration_ms,
+            t.isrc,
+            'included',
+            1
+        FROM playlist_tracks AS pt
+        JOIN tracks AS t ON t.spotify_id = pt.track_id
+        JOIN spotify_playlist_catalog AS c ON c.spotify_id = pt.playlist_id
         """
     )
 
