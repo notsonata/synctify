@@ -29,7 +29,7 @@ from synctify.user_config import (
 def test_missing_config_uses_built_in_defaults(tmp_path: Path) -> None:
     config = load_user_config(tmp_path)
 
-    assert config.source_priority == ("qobuz", "tidal", "deezer", "soundcloud")
+    assert config.source_priority == ("qobuz", "tidal", "deezer")
     assert config.qobuz_dl == "qobuz-dl"
     assert config.streamrip == "rip"
     assert config.rclone == "rclone"
@@ -58,10 +58,35 @@ def test_set_and_unset_store_only_explicit_overrides(tmp_path: Path) -> None:
 def test_invalid_config_values_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(UserConfigError, match="duplicates"):
         set_user_config(tmp_path, "source-priority", "qobuz,qobuz")
+    with pytest.raises(UserConfigError, match="unsupported source"):
+        set_user_config(tmp_path, "source-priority", "soundcloud,qobuz")
+    with pytest.raises(UserConfigError, match="must be one of"):
+        set_user_config(tmp_path, "qobuz-quality", "5")
     with pytest.raises(UserConfigError, match="must be one of"):
         set_user_config(tmp_path, "qobuz-quality", "4")
     with pytest.raises(UserConfigError, match="unknown config key"):
         set_user_config(tmp_path, "nope", "value")
+
+
+def test_legacy_lossy_settings_remain_readable_but_resolve_losslessly(tmp_path: Path) -> None:
+    config_path(tmp_path).write_text(
+        json.dumps(
+            {
+                "source_priority": ["soundcloud", "qobuz", "tidal"],
+                "qobuz_quality": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_user_config(tmp_path)
+
+    assert config.source_priority == ("qobuz", "tidal")
+    assert config.qobuz_quality == 6
+    # Loading compatibility does not silently rewrite the user's saved file.
+    raw = json.loads(config_path(tmp_path).read_text(encoding="utf-8"))
+    assert raw["source_priority"] == ["soundcloud", "qobuz", "tidal"]
+    assert raw["qobuz_quality"] == 5
 
 
 def test_precedence_cli_then_environment_then_saved_then_builtin(
@@ -99,8 +124,11 @@ def test_precedence_cli_then_environment_then_saved_then_builtin(
     assert resolve_qobuz_dl(config, "/cli/qobuz-dl") == "/cli/qobuz-dl"
     assert resolve_streamrip(config, "/cli/rip") == "/cli/rip"
     assert resolve_rclone(config, "/cli/rclone") == "/cli/rclone"
-    assert resolve_source_priority(config, "soundcloud,qobuz") == ("soundcloud", "qobuz")
-    assert resolve_qobuz_quality(config, 5) == 5
+    assert resolve_source_priority(config, "qobuz,deezer") == ("qobuz", "deezer")
+    with pytest.raises(UserConfigError, match="unsupported source"):
+        resolve_source_priority(config, "soundcloud,qobuz")
+    with pytest.raises(UserConfigError, match="must be one of"):
+        resolve_qobuz_quality(config, 5)
     assert resolve_streamrip_quality(config, "tidal", 4) == 4
 
 
@@ -119,7 +147,7 @@ def test_config_cli_set_show_and_unset(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     result = runner.invoke(app, ["config", "unset", "source-priority"])
     assert result.exit_code == 0
-    assert "source-priority: qobuz,tidal,deezer,soundcloud" in result.stdout
+    assert "source-priority: qobuz,tidal,deezer" in result.stdout
 
 
 def test_configured_acquire_passes_saved_defaults_to_existing_command(
