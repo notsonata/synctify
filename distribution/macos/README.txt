@@ -27,7 +27,9 @@ Quick start
 
    synctify
 
-The stable command can run every normal CLI command, for example:
+The TUI can now import Spotify desired state, run the coordinated update, and
+execute existing non-interactive Synctify commands from its Commands tab. The
+stable command can also run every normal CLI command directly, for example:
 
    synctify doctor
    synctify update --dry-run
@@ -37,7 +39,7 @@ Installed Synctify checks for a newer stable release every time `synctify` is
 run. When a newer release is available in an interactive Terminal, the default
 behavior is:
 
-   Synctify 1.0.6 is available (current: 1.0.5). Update now? [Y/n]
+   Synctify 1.1.1 is available (current: 1.1.0). Update now? [Y/n]
 
 Answering yes downloads the matching macOS release bundle, validates it,
 installs it into a new versioned app directory, switches app/current, and
