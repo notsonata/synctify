@@ -5,6 +5,7 @@ from pathlib import Path
 from synctify.auto_resolution import pending_resolution_tracks
 from synctify.db import connect, initialize
 from synctify.local_reconcile import reconcile_confirmed_local_tracks
+from synctify.resolution import Candidate
 
 
 def _insert_confirmed_track(
@@ -12,34 +13,65 @@ def _insert_confirmed_track(
     spotify_id: str,
     *,
     local_path: Path | None = None,
+    isrc: str = "USAAA2600001",
+    title: str = "Song",
 ) -> None:
     connection.execute(
         """
         INSERT INTO tracks(
             spotify_id, title, artist, album, isrc, duration_ms, local_path, status
-        ) VALUES (?, 'Song', 'Artist', 'Album', 'USAAA2600001', 180000, ?, ?)
+        ) VALUES (?, ?, 'Artist', 'Album', ?, 180000, ?, ?)
         """,
         (
             spotify_id,
+            title,
+            isrc,
             None if local_path is None else str(local_path),
             "unresolved" if local_path is None else "local",
         ),
     )
     connection.execute(
-        "INSERT INTO playlists(spotify_id, name) VALUES ('playlist-1', 'Playlist')"
+        "INSERT OR IGNORE INTO playlists(spotify_id, name) VALUES ('playlist-1', 'Playlist')"
     )
+    position = connection.execute(
+        "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = 'playlist-1'"
+    ).fetchone()[0]
     connection.execute(
-        "INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES ('playlist-1', ?, 0)",
-        (spotify_id,),
+        "INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES ('playlist-1', ?, ?)",
+        (spotify_id, position),
     )
 
 
-def test_valid_recorded_local_flac_never_enters_provider_resolution(tmp_path: Path) -> None:
+def _local_candidate(
+    path: Path,
+    *,
+    isrc: str | None = "USAAA2600001",
+    title: str = "Song",
+) -> Candidate:
+    return Candidate(
+        provider="local",
+        provider_track_id=str(path),
+        title=title,
+        artist="Artist",
+        album="Album",
+        isrc=isrc,
+        duration_ms=180000,
+    )
+
+
+def test_valid_recorded_local_flac_never_enters_provider_resolution(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     database = tmp_path / "state.sqlite3"
     library = tmp_path / "library"
     library.mkdir()
     flac = library / "Artist - Song.flac"
     flac.write_bytes(b"already-local")
+    monkeypatch.setattr(
+        "synctify.local_reconcile._safe_library_candidates",
+        lambda _root: {flac.resolve(): _local_candidate(flac.resolve())},
+    )
 
     initialize(database)
     with connect(database) as connection:
@@ -54,7 +86,40 @@ def test_valid_recorded_local_flac_never_enters_provider_resolution(tmp_path: Pa
     assert flac.exists()
 
 
-def test_unrecorded_local_flac_is_attached_before_provider_resolution(
+def test_mismatched_recorded_local_flac_is_cleared_before_resolution(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "state.sqlite3"
+    library = tmp_path / "library"
+    library.mkdir()
+    flac = library / "Wrong.flac"
+    flac.write_bytes(b"wrong")
+    monkeypatch.setattr(
+        "synctify.local_reconcile._safe_library_candidates",
+        lambda _root: {
+            flac.resolve(): _local_candidate(flac.resolve(), isrc="USZZZ2699999", title="Other Song")
+        },
+    )
+
+    initialize(database)
+    with connect(database) as connection:
+        _insert_confirmed_track(connection, "spotify-1", local_path=flac)
+        report = reconcile_confirmed_local_tracks(connection, library)
+        row = connection.execute(
+            "SELECT local_path, status FROM tracks WHERE spotify_id = 'spotify-1'"
+        ).fetchone()
+        pending = pending_resolution_tracks(connection)
+
+    assert report.reused == 0
+    assert report.stale_cleared == 1
+    assert row["local_path"] is None
+    assert row["status"] == "unresolved"
+    assert [track.spotify_id for track in pending] == ["spotify-1"]
+    assert flac.exists()
+
+
+def test_unrecorded_local_flac_is_attached_only_by_unique_exact_isrc(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -63,18 +128,10 @@ def test_unrecorded_local_flac_is_attached_before_provider_resolution(
     library.mkdir()
     flac = library / "Existing.flac"
     flac.write_bytes(b"existing")
-
-    class FakeIndex:
-        def __init__(self, root: Path) -> None:
-            assert root == library
-
-        def find(self, candidate):
-            assert candidate.title == "Song"
-            assert candidate.artist == "Artist"
-            assert candidate.isrc == "USAAA2600001"
-            return flac
-
-    monkeypatch.setattr("synctify.local_reconcile.FLACReconciliationIndex", FakeIndex)
+    monkeypatch.setattr(
+        "synctify.local_reconcile._safe_library_candidates",
+        lambda _root: {flac.resolve(): _local_candidate(flac.resolve())},
+    )
     monkeypatch.setattr("synctify.local_reconcile.file_sha256", lambda _path: "abc123")
 
     initialize(database)
@@ -89,10 +146,65 @@ def test_unrecorded_local_flac_is_attached_before_provider_resolution(
 
     assert report.reused == 0
     assert report.matched == 1
-    assert row["local_path"] == str(flac)
+    assert row["local_path"] == str(flac.resolve())
     assert row["sha256"] == "abc123"
     assert row["status"] == "local"
     assert pending == ()
+
+
+def test_metadata_only_local_candidate_is_not_auto_adopted(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "state.sqlite3"
+    library = tmp_path / "library"
+    library.mkdir()
+    flac = library / "Looks Similar.flac"
+    flac.write_bytes(b"similar")
+    monkeypatch.setattr(
+        "synctify.local_reconcile._safe_library_candidates",
+        lambda _root: {flac.resolve(): _local_candidate(flac.resolve(), isrc=None)},
+    )
+
+    initialize(database)
+    with connect(database) as connection:
+        _insert_confirmed_track(connection, "spotify-1")
+        report = reconcile_confirmed_local_tracks(connection, library)
+        row = connection.execute(
+            "SELECT local_path FROM tracks WHERE spotify_id = 'spotify-1'"
+        ).fetchone()
+
+    assert report.matched == 0
+    assert row["local_path"] is None
+    assert flac.exists()
+
+
+def test_one_unrecorded_flac_is_not_auto_assigned_to_multiple_spotify_ids(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "state.sqlite3"
+    library = tmp_path / "library"
+    library.mkdir()
+    flac = library / "Shared.flac"
+    flac.write_bytes(b"shared")
+    monkeypatch.setattr(
+        "synctify.local_reconcile._safe_library_candidates",
+        lambda _root: {flac.resolve(): _local_candidate(flac.resolve())},
+    )
+    monkeypatch.setattr("synctify.local_reconcile.file_sha256", lambda _path: "abc123")
+
+    initialize(database)
+    with connect(database) as connection:
+        _insert_confirmed_track(connection, "spotify-1")
+        _insert_confirmed_track(connection, "spotify-2")
+        report = reconcile_confirmed_local_tracks(connection, library)
+        local_rows = connection.execute(
+            "SELECT spotify_id FROM tracks WHERE local_path IS NOT NULL ORDER BY spotify_id"
+        ).fetchall()
+
+    assert report.matched == 1
+    assert len(local_rows) == 1
 
 
 def test_schema_v7_requires_review_without_deleting_local_flacs(tmp_path: Path) -> None:
