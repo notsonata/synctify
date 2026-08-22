@@ -92,7 +92,10 @@ def add_filesystem_target(
     cleaned_name = name.strip()
     if not cleaned_name:
         raise ValueError("target name cannot be empty")
-    destination_text = str(destination.expanduser())
+    try:
+        destination_text = str(destination.expanduser().resolve(strict=False))
+    except OSError as exc:
+        raise ValueError(f"could not resolve filesystem target destination: {exc}") from exc
     try:
         cursor = connection.execute(
             """
@@ -156,6 +159,11 @@ def validate_filesystem_target(target: SyncTarget, app_home: Path) -> Path:
         raise ValueError(f"target {target.name!r} is not configured for mirror mode")
 
     destination = Path(target.destination).expanduser()
+    if not destination.is_absolute():
+        raise UnsafeSyncTargetError(
+            f"target destination is relative and unsafe for mirror mode: {destination}; "
+            "remove and recreate the target"
+        )
     if not destination.exists():
         raise UnsafeSyncTargetError(
             f"target destination is not mounted or does not exist: {destination}"
