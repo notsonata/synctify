@@ -3,12 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from synctify.acquisition import AcquisitionTask, acquire_tasks
 from synctify.db import connect, initialize
+from synctify.migration_cli import app
 from synctify.providers.base import AcquiredTrack
 from synctify.providers.reconcile import find_existing_flac
-from synctify.resolution import Candidate, set_manual_override
+from synctify.resolution import (
+    Candidate,
+    MatchMethod,
+    Resolution,
+    ResolutionStatus,
+    save_resolution,
+    set_manual_override,
+)
 from synctify.spotify.ingest import PlaylistEntry, SpotifyPlaylist, SpotifySnapshot, SpotifyTrack
 from synctify.spotify.state import apply_snapshot
 from synctify.workflow import run_update_workflow
@@ -115,6 +124,49 @@ def test_manual_override_rejects_retired_soundcloud_provider(tmp_path: Path) -> 
         apply_snapshot(connection, _snapshot())
         with pytest.raises(ValueError, match="unsupported resolution provider"):
             set_manual_override(connection, "spotify-1", "soundcloud", "legacy-id")
+
+
+def test_save_resolution_persists_normalized_provider(tmp_path: Path) -> None:
+    database = tmp_path / "state.sqlite3"
+    initialize(database)
+    with connect(database) as connection:
+        apply_snapshot(connection, _snapshot())
+        save_resolution(
+            connection,
+            "spotify-1",
+            Resolution(
+                ResolutionStatus.RESOLVED,
+                Candidate(" TIDAL ", "tidal-1", "Song", "Artist"),
+                MatchMethod.METADATA,
+                0.95,
+                "test",
+            ),
+        )
+        row = connection.execute(
+            "SELECT provider FROM track_resolutions WHERE spotify_id = 'spotify-1'"
+        ).fetchone()
+
+    assert row["provider"] == "tidal"
+
+
+def test_legacy_cli_reports_unsupported_manual_provider_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("SYNCTIFY_HOME", str(home))
+    initialize(home / "synctify.sqlite3")
+    with connect(home / "synctify.sqlite3") as connection:
+        apply_snapshot(connection, _snapshot())
+
+    result = CliRunner().invoke(
+        app,
+        ["resolve", "set", "spotify-1", "soundcloud", "legacy-id"],
+    )
+
+    assert result.exit_code == 2
+    assert "unsupported resolution provider" in result.output
+    assert "Traceback" not in result.output
 
 
 class _ReconcileProvider:
