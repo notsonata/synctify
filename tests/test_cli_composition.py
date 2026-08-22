@@ -7,6 +7,7 @@ import typer
 from typer.testing import CliRunner
 
 from synctify.app import app
+from synctify.db import connect, initialize
 from synctify.migration_cli import app as legacy_app
 
 
@@ -78,6 +79,31 @@ def test_all_help_paths_render_from_explicit_app() -> None:
     for group in ("spotify", "resolve", "qobuz", "streamrip", "playlists", "targets", "config"):
         result = runner.invoke(app, [group, "--help"])
         assert result.exit_code == 0, result.output
+
+
+def test_explicit_resolve_set_reports_unsupported_provider_cleanly(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("SYNCTIFY_HOME", str(home))
+    initialize(home / "synctify.sqlite3")
+    with connect(home / "synctify.sqlite3") as connection:
+        connection.execute(
+            """
+            INSERT INTO tracks(spotify_id, title, artist, album, isrc, duration_ms)
+            VALUES ('spotify-1', 'Song', 'Artist', 'Album', 'USAAA2600001', 180000)
+            """
+        )
+
+    result = CliRunner().invoke(
+        app,
+        ["resolve", "set", "spotify-1", "soundcloud", "legacy-id"],
+    )
+
+    assert result.exit_code == 2
+    assert "unsupported resolution provider" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_installed_entry_point_targets_explicit_composition_module() -> None:
