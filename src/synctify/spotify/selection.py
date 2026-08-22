@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from ..gc import CleanupReport, clean_unreferenced_tracks
 from ..playlists import PlaylistBuildReport, build_playlists
 from .client import SpotifyAPIError, SpotifyClient
-from .ingest import LIKED_SONGS_ID, PlaylistEntry, SpotifyTrack, _parse_entries
+from .ingest import LIKED_SONGS_ID, PlaylistEntry, parse_track
 
 CancelCheck = Callable[[], bool]
 ProgressReporter = Callable[[str], None]
@@ -105,8 +105,6 @@ def fetch_playlist_catalog(
         owner_id = owner.get("id") if isinstance(owner, dict) else None
         collaborative = raw.get("collaborative") is True
         if not isinstance(playlist_id, str) or not isinstance(name, str):
-            continue
-        if owner_id != user_id and not collaborative:
             continue
         snapshot_id = raw.get("snapshot_id")
         tracks = raw.get("tracks")
@@ -231,6 +229,35 @@ def _records(entries: Iterable[PlaylistEntry]) -> list[tuple[str, int, PlaylistE
     return result
 
 
+def _parse_entries_cancellable(
+    items: Iterable[dict[str, Any]],
+    *,
+    playlist_items: bool,
+    cancelled: CancelCheck | None,
+    progress: ProgressReporter | None,
+    playlist_name: str,
+) -> tuple[PlaylistEntry, ...]:
+    entries: list[PlaylistEntry] = []
+    for index, wrapper in enumerate(items, start=1):
+        _check_cancel(cancelled)
+        raw_track = wrapper.get("item") if playlist_items else wrapper.get("track")
+        if playlist_items and raw_track is None:
+            raw_track = wrapper.get("track")
+        track = parse_track(raw_track if isinstance(raw_track, dict) else None)
+        if track is not None:
+            added_at = wrapper.get("added_at")
+            entries.append(
+                PlaylistEntry(
+                    track,
+                    added_at if isinstance(added_at, str) else None,
+                )
+            )
+        if index % 50 == 0:
+            _notify(progress, f"Fetching {playlist_name}… {index} item(s) read")
+    _check_cancel(cancelled)
+    return tuple(entries)
+
+
 def fetch_one_playlist(
     client: SpotifyClient,
     playlist: PlaylistCatalogEntry,
@@ -245,8 +272,13 @@ def fetch_one_playlist(
         if playlist.source_kind == "liked"
         else client.playlist_items(playlist.spotify_id)
     )
-    parsed, _skipped = _parse_entries(source, playlist_items=playlist.source_kind != "liked")
-    _check_cancel(cancelled)
+    parsed = _parse_entries_cancellable(
+        source,
+        playlist_items=playlist.source_kind != "liked",
+        cancelled=cancelled,
+        progress=progress,
+        playlist_name=playlist.name,
+    )
     _notify(progress, f"Fetched {len(parsed)} track(s) from {playlist.name}.")
     return parsed
 
@@ -466,6 +498,8 @@ def confirm_playlist(connection: sqlite3.Connection, playlist_id: str) -> None:
     ).fetchone()
     if catalog is None:
         raise KeyError(f"unknown Spotify playlist: {playlist_id}")
+    if catalog["tracked"]:
+        raise ValueError("playlist is already imported; review pending changes and use Apply Choices")
     if connection.execute(
         "SELECT 1 FROM spotify_playlist_items WHERE playlist_id = ? LIMIT 1",
         (playlist_id,),
@@ -537,7 +571,7 @@ def update_tracked_playlists(
                 client,
                 playlist,
                 cancelled=cancelled,
-                progress=None,
+                progress=progress,
             )
         except SpotifyAPIError as exc:
             if exc.status_code == 403:
