@@ -39,8 +39,9 @@ def build_distribution(root: Path, dist_dir: Path) -> Path:
         )
 
     launcher = root / "distribution" / "macos" / "synctify.sh"
+    installer = root / "distribution" / "macos" / "install.sh"
     instructions = root / "distribution" / "macos" / "README.txt"
-    if not launcher.is_file() or not instructions.is_file():
+    if not launcher.is_file() or not installer.is_file() or not instructions.is_file():
         raise RuntimeError("macOS distribution templates are missing")
 
     dist_dir.mkdir(parents=True, exist_ok=True)
@@ -54,6 +55,12 @@ def build_distribution(root: Path, dist_dir: Path) -> Path:
             archive,
             prefix + "synctify.sh",
             launcher.read_bytes(),
+            mode=0o755,
+        )
+        _write_bytes(
+            archive,
+            prefix + "install.sh",
+            installer.read_bytes(),
             mode=0o755,
         )
         _write_bytes(
