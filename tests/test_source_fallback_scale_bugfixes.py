@@ -19,9 +19,17 @@ class _Rows:
         return self._rows
 
 
-class _NoParameterizedIdConnection:
+class _BoundedIdConnection:
+    def __init__(self) -> None:
+        self.param_counts: list[int] = []
+
     def execute(self, sql: str, params=()):
-        assert params == (), "Spotify ID filtering must not bind one SQL variable per ID"
+        params = tuple(params)
+        self.param_counts.append(len(params))
+        assert "spotify_id IN" in sql
+        assert 0 < len(params) <= 400
+        if "wanted" not in params:
+            return _Rows([])
         return _Rows(
             [
                 {
@@ -32,16 +40,7 @@ class _NoParameterizedIdConnection:
                     "isrc": "ISRC1",
                     "duration_ms": 180_000,
                     "local_path": None,
-                },
-                {
-                    "spotify_id": "other",
-                    "title": "Other",
-                    "artist": "Artist",
-                    "album": "Album",
-                    "isrc": "ISRC2",
-                    "duration_ms": 181_000,
-                    "local_path": None,
-                },
+                }
             ]
         )
 
@@ -50,17 +49,18 @@ def _plan() -> ChangePlan:
     return ChangePlan((), (), (), (), 0, 0, 0, ())
 
 
-def test_selected_fallback_ids_are_filtered_without_sql_variable_binding() -> None:
-    # Include a deliberately large frozen selection to guard against restoring an
-    # IN (?, ?, ...) query in a later refactor.
+def test_selected_fallback_ids_use_bounded_database_side_chunks() -> None:
     selected = tuple(["wanted", *(f"missing-{index}" for index in range(50_000))])
+    connection = _BoundedIdConnection()
 
     tracks = pending_resolution_tracks(
-        _NoParameterizedIdConnection(),  # type: ignore[arg-type]
+        connection,  # type: ignore[arg-type]
         spotify_ids=selected,
     )
 
     assert [track.spotify_id for track in tracks] == ["wanted"]
+    assert max(connection.param_counts) <= 400
+    assert len(connection.param_counts) > 1
 
 
 def test_compatibility_resolution_uses_final_fallback_outcome() -> None:

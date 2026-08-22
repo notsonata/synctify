@@ -7,6 +7,7 @@ import sqlite3
 from typing import Sequence
 
 from .providers.base import AcquisitionProvider
+from .providers.reconcile import reconciliation_batch
 from .resolution import Candidate
 
 
@@ -175,39 +176,45 @@ def acquire_tasks(
     completed: list[AcquiredResult] = []
     failures: list[AcquisitionFailure] = []
 
-    for task in tasks:
-        if not provider.supports(task.provider):
-            failures.append(
-                AcquisitionFailure(
-                    task.spotify_id,
-                    f"downloader {provider.name!r} does not support source {task.provider!r}",
+    # qobuz-dl/Streamrip may report an already-downloaded item without returning
+    # a path. Build one metadata index for this batch so reconciliation does not
+    # recursively rescan and reparse the entire FLAC library once per skipped item.
+    with reconciliation_batch(destination) as reconciliation_index:
+        for task in tasks:
+            if not provider.supports(task.provider):
+                failures.append(
+                    AcquisitionFailure(
+                        task.spotify_id,
+                        f"downloader {provider.name!r} does not support source {task.provider!r}",
+                    )
                 )
-            )
-            continue
+                continue
 
-        try:
-            acquired = provider.acquire(task.candidate(), destination)
-            if acquired.provider != task.provider:
-                raise ValueError("downloader returned an unexpected source provider")
-            if acquired.provider_track_id != task.provider_track_id:
-                raise ValueError("downloader returned an unexpected track ID")
+            try:
+                acquired = provider.acquire(task.candidate(), destination)
+                if acquired.provider != task.provider:
+                    raise ValueError("downloader returned an unexpected source provider")
+                if acquired.provider_track_id != task.provider_track_id:
+                    raise ValueError("downloader returned an unexpected track ID")
 
-            path = acquired.path.expanduser().resolve()
-            if not path.is_file():
-                raise FileNotFoundError(f"acquired file does not exist: {path}")
+                path = acquired.path.expanduser().resolve()
+                if not path.is_file():
+                    raise FileNotFoundError(f"acquired file does not exist: {path}")
 
-            sha256 = file_sha256(path)
-            _record_acquired(connection, task, path, sha256)
-            completed.append(
-                AcquiredResult(
-                    task.spotify_id,
-                    path,
-                    sha256,
-                    reconciled=acquired.reconciled,
+                # Keep the batch cache aware of files created earlier in this same run.
+                reconciliation_index.add_path(path)
+                sha256 = file_sha256(path)
+                _record_acquired(connection, task, path, sha256)
+                completed.append(
+                    AcquiredResult(
+                        task.spotify_id,
+                        path,
+                        sha256,
+                        reconciled=acquired.reconciled,
+                    )
                 )
-            )
-        except (RuntimeError, OSError, ValueError) as exc:
-            failures.append(AcquisitionFailure(task.spotify_id, str(exc)))
+            except (RuntimeError, OSError, ValueError) as exc:
+                failures.append(AcquisitionFailure(task.spotify_id, str(exc)))
 
     return AcquisitionReport(tuple(completed), tuple(failures))
 

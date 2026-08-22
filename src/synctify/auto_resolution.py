@@ -70,27 +70,25 @@ class AutoResolutionReport:
         return sum(1 for attempt in self.attempts if attempt.error is not None)
 
 
-def pending_resolution_tracks(
+def _track_from_row(row: sqlite3.Row) -> Track:
+    return Track(
+        spotify_id=row["spotify_id"],
+        title=row["title"],
+        artist=row["artist"],
+        album=row["album"],
+        isrc=row["isrc"],
+        duration_ms=row["duration_ms"],
+        local_path=None if not row["local_path"] else Path(row["local_path"]),
+    )
+
+
+def _query_pending_rows(
     connection: sqlite3.Connection,
+    spotify_ids: Sequence[str] | None,
     *,
-    limit: int | None = None,
-    spotify_ids: Sequence[str] | None = None,
-) -> tuple[Track, ...]:
-    """Return unresolved desired tracks without parameter-per-ID SQL filtering.
-
-    Fallback freezes an initial Spotify-ID set and may pass thousands of IDs back
-    through this function for later sources. Filtering that set in Python avoids
-    SQLite's connection-specific variable limit while preserving database order.
-    """
-    selected_ids: set[str] | None = None
-    if spotify_ids is not None:
-        selected = tuple(dict.fromkeys(spotify_ids))
-        if not selected:
-            return ()
-        selected_ids = set(selected)
-
-    rows = connection.execute(
-        """
+    limit: int | None,
+) -> list[sqlite3.Row]:
+    base = """
         SELECT t.spotify_id, t.title, t.artist, t.album, t.isrc, t.duration_ms, t.local_path
         FROM tracks AS t
         WHERE NOT EXISTS (
@@ -103,23 +101,55 @@ def pending_resolution_tracks(
               FROM playlist_tracks AS pt
               WHERE pt.track_id = t.spotify_id
           )
-        ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.title COLLATE NOCASE
-        """
-    ).fetchall()
-    tracks = tuple(
-        Track(
-            spotify_id=row["spotify_id"],
-            title=row["title"],
-            artist=row["artist"],
-            album=row["album"],
-            isrc=row["isrc"],
-            duration_ms=row["duration_ms"],
-            local_path=None if not row["local_path"] else Path(row["local_path"]),
+    """
+    order = " ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.title COLLATE NOCASE"
+
+    if spotify_ids is None:
+        params: tuple[object, ...] = () if limit is None else (limit,)
+        suffix = order if limit is None else order + " LIMIT ?"
+        return list(connection.execute(base + suffix, params).fetchall())
+
+    selected = tuple(dict.fromkeys(spotify_ids))
+    if not selected:
+        return []
+
+    # Keep each query comfortably below SQLite's connection-specific bind limit.
+    # Small --resolution-limit selections therefore only materialize the selected
+    # rows instead of rescanning the whole unresolved library on every fallback.
+    rows: list[sqlite3.Row] = []
+    chunk_size = 400
+    for offset in range(0, len(selected), chunk_size):
+        chunk = selected[offset : offset + chunk_size]
+        placeholders = ", ".join("?" for _ in chunk)
+        rows.extend(
+            connection.execute(
+                base + f" AND t.spotify_id IN ({placeholders})",
+                chunk,
+            ).fetchall()
         )
-        for row in rows
-        if selected_ids is None or row["spotify_id"] in selected_ids
+
+    rows.sort(
+        key=lambda row: (
+            str(row["artist"] or "").casefold(),
+            str(row["album"] or "").casefold(),
+            str(row["title"] or "").casefold(),
+            str(row["spotify_id"]),
+        )
     )
-    return tracks if limit is None else tracks[:limit]
+    return rows if limit is None else rows[:limit]
+
+
+def pending_resolution_tracks(
+    connection: sqlite3.Connection,
+    *,
+    limit: int | None = None,
+    spotify_ids: Sequence[str] | None = None,
+) -> tuple[Track, ...]:
+    """Return unresolved desired tracks with bounded database-side filtering."""
+    return tuple(
+        _track_from_row(row)
+        for row in _query_pending_rows(connection, spotify_ids, limit=limit)
+    )
 
 
 def auto_resolve_tracks(

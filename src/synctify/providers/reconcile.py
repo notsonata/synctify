@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from ..models import Track
 from ..resolution import Candidate, ResolutionStatus, resolve_track
@@ -134,6 +136,64 @@ def _safe_flac_paths(destination: Path, paths: Iterable[Path] | None) -> tuple[P
     return tuple(sorted(safe))
 
 
+class FLACReconciliationIndex:
+    """One-batch cache of parsed canonical FLAC metadata."""
+
+    def __init__(self, destination: Path) -> None:
+        self.root = destination.expanduser().resolve()
+        self._candidates: dict[Path, Candidate] = {}
+        for path in _safe_flac_paths(self.root, None):
+            self.add_path(path)
+
+    def add_path(self, path: Path) -> None:
+        try:
+            resolved = path.expanduser().resolve()
+            resolved.relative_to(self.root)
+        except (OSError, ValueError):
+            return
+        if resolved in self._candidates or not resolved.is_file() or resolved.suffix.lower() != ".flac":
+            return
+        metadata = read_flac_candidate(resolved)
+        if metadata is not None:
+            self._candidates[resolved] = metadata
+
+    def find(self, candidate: Candidate) -> Path | None:
+        target = Track(
+            spotify_id=f"reconcile:{candidate.provider}:{candidate.provider_track_id}",
+            title=candidate.title,
+            artist=candidate.artist,
+            album=candidate.album,
+            isrc=candidate.isrc,
+            duration_ms=candidate.duration_ms,
+        )
+        resolution = resolve_track(target, tuple(self._candidates.values()))
+        if resolution.status is not ResolutionStatus.RESOLVED or resolution.candidate is None:
+            return None
+        matched = Path(resolution.candidate.provider_track_id).resolve()
+        try:
+            matched.relative_to(self.root)
+        except ValueError:
+            return None
+        return matched if matched.is_file() else None
+
+
+_ACTIVE_INDEX: ContextVar[FLACReconciliationIndex | None] = ContextVar(
+    "synctify_flac_reconciliation_index",
+    default=None,
+)
+
+
+@contextmanager
+def reconciliation_batch(destination: Path) -> Iterator[FLACReconciliationIndex]:
+    """Parse the canonical library once and reuse metadata for one acquisition batch."""
+    index = FLACReconciliationIndex(destination)
+    token = _ACTIVE_INDEX.set(index)
+    try:
+        yield index
+    finally:
+        _ACTIVE_INDEX.reset(token)
+
+
 def find_existing_flac(
     candidate: Candidate,
     destination: Path,
@@ -141,30 +201,17 @@ def find_existing_flac(
     paths: Iterable[Path] | None = None,
 ) -> Path | None:
     """Return one safely matched existing FLAC, otherwise refuse to guess."""
-    target = Track(
-        spotify_id=f"reconcile:{candidate.provider}:{candidate.provider_track_id}",
-        title=candidate.title,
-        artist=candidate.artist,
-        album=candidate.album,
-        isrc=candidate.isrc,
-        duration_ms=candidate.duration_ms,
-    )
+    root = destination.expanduser().resolve()
+    active = _ACTIVE_INDEX.get()
+    if paths is None and active is not None and active.root == root:
+        return active.find(candidate)
 
-    local_candidates = tuple(
-        metadata
-        for path in _safe_flac_paths(destination, paths)
-        if (metadata := read_flac_candidate(path)) is not None
-    )
-    resolution = resolve_track(target, local_candidates)
-    if resolution.status is not ResolutionStatus.RESOLVED or resolution.candidate is None:
-        return None
-
-    matched = Path(resolution.candidate.provider_track_id).resolve()
-    try:
-        matched.relative_to(destination.expanduser().resolve())
-    except ValueError:
-        return None
-    return matched if matched.is_file() else None
+    index = FLACReconciliationIndex.__new__(FLACReconciliationIndex)
+    index.root = root
+    index._candidates = {}
+    for path in _safe_flac_paths(root, paths):
+        index.add_path(path)
+    return index.find(candidate)
 
 
 def output_reports_existing_file(stdout: str, stderr: str) -> bool:
