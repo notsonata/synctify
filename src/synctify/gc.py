@@ -63,7 +63,10 @@ def _track_candidate(row: sqlite3.Row, library_dir: Path) -> CollectibleTrack:
             size_bytes=None,
             exists=True,
             safe_to_delete=False,
-            reason="recorded local path is a symbolic link; refusing to delete through it",
+            reason=(
+                "recorded local path is a symbolic link; refusing to resolve or delete through it "
+                "inside or outside the canonical library"
+            ),
         )
 
     try:
