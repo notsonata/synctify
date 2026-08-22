@@ -33,11 +33,16 @@ The stable command can run every normal CLI command, for example:
    synctify update --dry-run
    synctify update
 
+Long update operations now print their current stage while Spotify state is
+fetched, tracks are resolved through each source, downloads are planned or run,
+and playlist readiness/building is checked. Progress goes to stderr while the
+final structured update report remains on stdout.
+
 Installed Synctify checks for a newer stable release every time `synctify` is
 run. When a newer release is available in an interactive Terminal, the default
 behavior is:
 
-   Synctify 1.0.6 is available (current: 1.0.5). Update now? [Y/n]
+   Synctify 1.0.7 is available (current: 1.0.6). Update now? [Y/n]
 
 Answering yes downloads the matching macOS release bundle, validates it,
 installs it into a new versioned app directory, switches app/current, and
