@@ -28,7 +28,7 @@ class StreamripSearchConfig:
 
 
 class StreamripCatalogSearch:
-    """Out-of-process catalog search through Streamrip's JSON search output."""
+    """Out-of-process catalog search through Streamrip's sparse JSON output."""
 
     name = "streamrip"
     supported_sources = STREAMRIP_SOURCES
@@ -157,6 +157,15 @@ class StreamripCatalogSearch:
         *,
         limit: int | None = None,
     ) -> Sequence[Candidate]:
+        """Return only candidates supported by two independent search queries.
+
+        Streamrip's machine-readable search output does not expose ISRC, album, or
+        duration. A title/artist-only result can otherwise receive a misleadingly
+        high metadata score and become a sticky automatic resolution. Synctify
+        therefore requires an exact provider track ID to be returned by both an
+        ISRC query and an artist/title query. Tracks without Spotify ISRC evidence
+        are left unresolved for manual handling rather than guessed automatically.
+        """
         normalized_source = source.strip().lower()
         if not self.supports(normalized_source):
             supported = ", ".join(sorted(self.supported_sources))
@@ -166,23 +175,33 @@ class StreamripCatalogSearch:
         self.require_available()
         selected_limit = self.config.results_per_query if limit is None else limit
 
-        queries: list[str] = []
         normalized_track_isrc = normalize_isrc(track.isrc)
-        if normalized_track_isrc:
-            queries.append(normalized_track_isrc)
-        metadata_query = " ".join(part for part in (track.artist.strip(), track.title.strip()) if part)
-        if metadata_query and metadata_query not in queries:
-            queries.append(metadata_query)
+        metadata_query = " ".join(
+            part for part in (track.artist.strip(), track.title.strip()) if part
+        )
+        if not normalized_track_isrc or not metadata_query:
+            return ()
 
+        isrc_candidates = self._search_query(
+            normalized_source,
+            normalized_track_isrc,
+            limit=selected_limit,
+        )
+        metadata_candidates = self._search_query(
+            normalized_source,
+            metadata_query,
+            limit=selected_limit,
+        )
+        isrc_ids = {
+            (candidate.provider, candidate.provider_track_id)
+            for candidate in isrc_candidates
+        }
+
+        # Preserve metadata-search order while requiring the same catalog identity
+        # to have independently appeared in the ISRC results.
         unique: dict[tuple[str, str], Candidate] = {}
-        for query in queries:
-            for candidate in self._search_query(
-                normalized_source,
-                query,
-                limit=selected_limit,
-            ):
-                unique.setdefault(
-                    (candidate.provider, candidate.provider_track_id),
-                    candidate,
-                )
+        for candidate in metadata_candidates:
+            key = (candidate.provider, candidate.provider_track_id)
+            if key in isrc_ids:
+                unique.setdefault(key, candidate)
         return tuple(unique.values())

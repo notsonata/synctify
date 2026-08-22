@@ -48,7 +48,7 @@ def test_build_search_command_is_non_shell_and_source_explicit(tmp_path: Path) -
     ]
 
 
-def test_search_uses_isrc_and_metadata_queries_and_deduplicates(
+def test_search_uses_isrc_and_metadata_queries_and_returns_shared_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands: list[list[str]] = []
@@ -89,6 +89,54 @@ def test_search_uses_isrc_and_metadata_queries_and_deduplicates(
     assert all(not path.exists() for path in output_paths)
 
 
+def test_search_rejects_candidate_not_returned_by_both_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        output = Path(command[command.index("--output-file") + 1])
+        candidate_id = "isrc-result" if calls == 1 else "metadata-result"
+        output.write_text(
+            json.dumps(
+                [
+                    {
+                        "source": "qobuz",
+                        "media_type": "track",
+                        "id": candidate_id,
+                        "desc": "Paranoid Android by Radiohead",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("synctify.providers.streamrip_search.shutil.which", lambda _: "/usr/bin/rip")
+
+    candidates = tuple(StreamripCatalogSearch(runner=runner).search(_track(), "qobuz"))
+
+    assert calls == 2
+    assert candidates == ()
+
+
+def test_search_without_spotify_isrc_refuses_sparse_metadata_guess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("synctify.providers.streamrip_search.shutil.which", lambda _: "/usr/bin/rip")
+
+    def runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        pytest.fail("Streamrip should not be queried without ISRC identity evidence")
+
+    candidates = tuple(
+        StreamripCatalogSearch(runner=runner).search(_track(isrc=None), "qobuz")
+    )
+
+    assert candidates == ()
+
+
 def test_search_ignores_invalid_result_shapes(monkeypatch: pytest.MonkeyPatch) -> None:
     def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         output = Path(command[command.index("--output-file") + 1])
@@ -108,7 +156,7 @@ def test_search_ignores_invalid_result_shapes(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("synctify.providers.streamrip_search.shutil.which", lambda _: "/usr/bin/rip")
     search = StreamripCatalogSearch(runner=runner)
 
-    candidates = tuple(search.search(_track(isrc=None, title="Song", artist="Artist"), "qobuz"))
+    candidates = tuple(search.search(_track(title="Song", artist="Artist"), "qobuz"))
 
     assert [candidate.provider_track_id for candidate in candidates] == ["good"]
 
@@ -121,7 +169,7 @@ def test_search_surfaces_streamrip_failure(monkeypatch: pytest.MonkeyPatch) -> N
     search = StreamripCatalogSearch(runner=runner)
 
     with pytest.raises(StreamripSearchError, match="login required"):
-        search.search(_track(isrc=None), "qobuz")
+        search.search(_track(), "qobuz")
 
 
 def test_search_rejects_unsupported_source_before_running() -> None:
