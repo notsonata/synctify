@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import sys
+
 import typer
 
+from . import __version__
 # Import command callables only. These modules still expose their historical Typer
 # apps for compatibility, but the installed CLI below does not reuse those mutable
 # app objects or depend on their decorator/import order.
@@ -20,6 +25,7 @@ from .cli import (
     targets_remove,
 )
 from .cli_entry import audit_command, clean_command
+from .config import Settings
 from .db import connect
 from .entrypoint import (
     config_set,
@@ -40,7 +46,10 @@ from .migration_cli import migrate_command
 from .portable_cli import export_command, import_command
 from .relink_cli import relink_command
 from .resolution import set_manual_override
+from .self_update import run_automatic_update
+from .self_update_cli import self_update_command
 from .setup_cli import setup_command
+from .user_config import UserConfigError, load_user_config, resolve_auto_update
 
 
 app = typer.Typer(
@@ -64,6 +73,52 @@ app.add_typer(streamrip_app, name="streamrip")
 app.add_typer(playlists_app, name="playlists")
 app.add_typer(targets_app, name="targets")
 app.add_typer(config_app, name="config")
+
+
+@app.callback()
+def automatic_update_callback(ctx: typer.Context) -> None:
+    """Run the cached automatic update policy for installed Synctify commands."""
+    if ctx.invoked_subcommand == "self-update" or "--help" in sys.argv[1:]:
+        return
+    if os.getenv("SYNCTIFY_INSTALLED") != "1" or os.getenv("SYNCTIFY_SKIP_AUTO_UPDATE") == "1":
+        return
+
+    try:
+        settings = Settings.default()
+        config = load_user_config(settings.home)
+        mode = resolve_auto_update(config)
+    except (OSError, UserConfigError):
+        # The command itself will surface invalid configuration where relevant.
+        # Background update checks must never make unrelated commands unusable.
+        return
+
+    result = run_automatic_update(mode, settings.home, __version__)
+    if result.error and mode == "install":
+        typer.echo(f"Automatic Synctify update failed: {result.error}", err=True)
+        return
+    if result.release is not None and mode == "check":
+        typer.echo(
+            f"Synctify {result.release.version} is available. "
+            "Run `synctify self-update` to install it.",
+            err=True,
+        )
+        return
+    if not result.installed or result.release is None:
+        return
+
+    typer.echo(
+        f"Synctify updated automatically: {__version__} -> {result.release.version}.",
+        err=True,
+    )
+    bin_dir = Path(os.getenv("SYNCTIFY_BIN_DIR", str(Path.home() / ".local" / "bin")))
+    command = bin_dir / "synctify"
+    if not command.is_file():
+        typer.echo("Re-run your command to use the new Synctify version.", err=True)
+        return
+
+    environment = os.environ.copy()
+    environment["SYNCTIFY_SKIP_AUTO_UPDATE"] = "1"
+    os.execve(str(command), [str(command), *sys.argv[1:]], environment)
 
 
 @resolve_app.command("set")
@@ -118,6 +173,7 @@ app.command("export")(export_command)
 app.command("import")(import_command)
 app.command("relink")(relink_command)
 app.command("migrate")(migrate_command)
+app.command("self-update")(self_update_command)
 
 # Spotify commands.
 spotify_app.command("login")(spotify_login)
