@@ -260,9 +260,9 @@ def relink_library(
 
     rows = _desired_rows(connection)
     already_local = sum(_usable_canonical_path(row, library_root) for row in rows)
-    target_rows = [row for row in rows if not _usable_canonical_path(row, library_root)]
-    if limit is not None:
-        target_rows = target_rows[:limit]
+    all_target_rows = [row for row in rows if not _usable_canonical_path(row, library_root)]
+    target_rows = all_target_rows if limit is None else all_target_rows[:limit]
+    selected_ids = {row["spotify_id"] for row in target_rows}
 
     source_paths = _scan_flacs(source_root)
     candidates = tuple(
@@ -271,12 +271,15 @@ def relink_library(
         if (candidate := read_flac_candidate(path)) is not None
     )
 
+    # Resolve every missing desired track before applying --limit. The limit controls
+    # expensive hashing/copying, but one-to-one source ownership must be global across
+    # all desired tracks or separate limited runs could reuse the same source FLAC.
     provisional: dict[str, tuple[sqlite3.Row, Path, MatchMethod, float]] = {}
     path_users: dict[Path, list[str]] = {}
     unmatched: list[RelinkUnmatched] = []
     failures: list[RelinkFailure] = []
 
-    for row in target_rows:
+    for row in all_target_rows:
         resolution = resolve_track(_track_from_row(row), candidates)
         if resolution.status is not ResolutionStatus.RESOLVED or resolution.candidate is None:
             unmatched.append(
@@ -315,6 +318,20 @@ def relink_library(
                     "one source FLAC matched multiple desired tracks; refusing shared automatic assignment",
                 )
             )
+
+    # Only selected tracks are reported/applied, but conflicts were computed against
+    # the entire desired missing set above.
+    provisional = {
+        spotify_id: value
+        for spotify_id, value in provisional.items()
+        if spotify_id in selected_ids
+    }
+    unmatched = [item for item in unmatched if item.spotify_id in selected_ids]
+    failures = [
+        item
+        for item in failures
+        if item.spotify_id is None or item.spotify_id in selected_ids
+    ]
 
     matches: list[RelinkMatch] = []
     rows_by_id = {row["spotify_id"]: row for row in target_rows}
