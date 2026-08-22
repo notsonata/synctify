@@ -41,6 +41,7 @@ jobs:
           python -m venv .venv-release
           .venv-release/bin/python -m pip install dist/synctify-*.whl
           .venv-release/bin/synctify --help >/dev/null
+          .venv-release/bin/synctify tui --help >/dev/null
           VERSION="$VERSION" .venv-release/bin/python -c 'import os, synctify; assert synctify.__version__ == os.environ["VERSION"]'
       - name: Generate checksums
         run: |
