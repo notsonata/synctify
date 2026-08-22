@@ -46,7 +46,13 @@ from .migration_cli import migrate_command
 from .portable_cli import export_command, import_command
 from .relink_cli import relink_command
 from .resolution import set_manual_override
-from .self_update import run_automatic_update
+from .self_update import (
+    UpdateError,
+    github_client,
+    install_release,
+    resolve_github_token,
+    run_automatic_update,
+)
 from .self_update_cli import self_update_command
 from .setup_cli import setup_command
 from .user_config import UserConfigError, load_user_config, resolve_auto_update
@@ -75,10 +81,32 @@ app.add_typer(targets_app, name="targets")
 app.add_typer(config_app, name="config")
 
 
+def _interactive_terminal() -> bool:
+    return bool(
+        getattr(sys.stdin, "isatty", lambda: False)()
+        and getattr(sys.stderr, "isatty", lambda: False)()
+    )
+
+
+def _restart_under_installed_release(version: str) -> None:
+    bin_dir = Path(os.getenv("SYNCTIFY_BIN_DIR", str(Path.home() / ".local" / "bin")))
+    command = bin_dir / "synctify"
+    if not command.is_file():
+        typer.echo(
+            f"Synctify updated to {version}. Re-run your command to use the new version.",
+            err=True,
+        )
+        return
+
+    environment = os.environ.copy()
+    environment["SYNCTIFY_SKIP_AUTO_UPDATE"] = "1"
+    os.execve(str(command), [str(command), *sys.argv[1:]], environment)
+
+
 @app.callback()
 def automatic_update_callback(ctx: typer.Context) -> None:
-    """Run the cached automatic update policy for installed Synctify commands."""
-    if ctx.invoked_subcommand == "self-update" or "--help" in sys.argv[1:]:
+    """Check the latest release before every installed Synctify invocation."""
+    if ctx.invoked_subcommand == "self-update":
         return
     if os.getenv("SYNCTIFY_INSTALLED") != "1" or os.getenv("SYNCTIFY_SKIP_AUTO_UPDATE") == "1":
         return
@@ -88,37 +116,52 @@ def automatic_update_callback(ctx: typer.Context) -> None:
         config = load_user_config(settings.home)
         mode = resolve_auto_update(config)
     except (OSError, UserConfigError):
-        # The command itself will surface invalid configuration where relevant.
         # Background update checks must never make unrelated commands unusable.
         return
 
-    result = run_automatic_update(mode, settings.home, __version__)
-    if result.error and mode == "install":
-        typer.echo(f"Automatic Synctify update failed: {result.error}", err=True)
+    result = run_automatic_update(mode, __version__)
+    if result.error:
+        if _interactive_terminal() or mode == "install":
+            typer.echo(f"Synctify update check failed: {result.error}", err=True)
         return
-    if result.release is not None and mode == "check":
+    if result.release is None:
+        return
+
+    release = result.release
+    if result.installed:
         typer.echo(
-            f"Synctify {result.release.version} is available. "
+            f"Synctify updated automatically: {__version__} -> {release.version}.",
+            err=True,
+        )
+        _restart_under_installed_release(release.version)
+        return
+
+    if mode == "check" or not _interactive_terminal():
+        typer.echo(
+            f"Synctify {release.version} is available (current: {__version__}). "
             "Run `synctify self-update` to install it.",
             err=True,
         )
         return
-    if not result.installed or result.release is None:
+
+    if mode != "prompt":
+        return
+    if not typer.confirm(
+        f"Synctify {release.version} is available (current: {__version__}). Update now?",
+        default=True,
+    ):
         return
 
-    typer.echo(
-        f"Synctify updated automatically: {__version__} -> {result.release.version}.",
-        err=True,
-    )
-    bin_dir = Path(os.getenv("SYNCTIFY_BIN_DIR", str(Path.home() / ".local" / "bin")))
-    command = bin_dir / "synctify"
-    if not command.is_file():
-        typer.echo("Re-run your command to use the new Synctify version.", err=True)
+    token = resolve_github_token()
+    try:
+        with github_client(token) as client:
+            install_release(release, client)
+    except UpdateError as exc:
+        typer.echo(f"Synctify update failed: {exc}", err=True)
         return
 
-    environment = os.environ.copy()
-    environment["SYNCTIFY_SKIP_AUTO_UPDATE"] = "1"
-    os.execve(str(command), [str(command), *sys.argv[1:]], environment)
+    typer.echo(f"Synctify updated: {__version__} -> {release.version}.", err=True)
+    _restart_under_installed_release(release.version)
 
 
 @resolve_app.command("set")
