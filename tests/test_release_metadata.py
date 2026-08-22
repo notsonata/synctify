@@ -14,7 +14,7 @@ def test_release_version_is_consistent() -> None:
     version = pyproject["project"]["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert version == "1.0.0"
+    assert version == "1.0.1"
     assert synctify.__version__ == version
     assert f"**Current version: {version}**" in readme
 
@@ -35,6 +35,14 @@ def test_readme_describes_current_automatic_resolution_contract() -> None:
     assert "Automatic Streamrip resolution currently requires a usable Spotify ISRC" in readme
     assert "same provider track ID appears in both query result sets" in readme
     assert "Tracks without a Spotify ISRC" in readme
+
+
+def test_readme_documents_release_zip_launcher() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "synctify-1.0.1-macos.zip" in readme
+    assert "./synctify.sh" in readme
+    assert "private `.venv`" in readme
 
 
 def test_installed_entry_point_uses_explicit_cli_app() -> None:
