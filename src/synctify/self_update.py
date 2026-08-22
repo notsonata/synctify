@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
 import tempfile
-import time
 from typing import Callable
 from zipfile import BadZipFile, ZipFile
 
@@ -18,7 +16,6 @@ import httpx
 
 REPOSITORY = "notsonata/synctify"
 API_ROOT = "https://api.github.com"
-AUTO_UPDATE_INTERVAL_SECONDS = 24 * 60 * 60
 _STABLE_TAG = re.compile(r"^v(?P<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$")
 
 
@@ -49,7 +46,8 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
     match = _STABLE_TAG.fullmatch(text if text.startswith("v") else f"v{text}")
     if match is None:
         raise UpdateError(f"invalid stable Synctify version: {value!r}")
-    return tuple(int(part) for part in match.group("version").split("."))  # type: ignore[return-value]
+    parts = tuple(int(part) for part in match.group("version").split("."))
+    return parts[0], parts[1], parts[2]
 
 
 def _repository() -> str:
@@ -92,7 +90,7 @@ def github_client(token: str | None = None) -> httpx.Client:
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    return httpx.Client(headers=headers, timeout=15.0, follow_redirects=True)
+    return httpx.Client(headers=headers, timeout=8.0, follow_redirects=True)
 
 
 def fetch_latest_release(
@@ -278,69 +276,21 @@ def install_release(
             )
 
 
-def update_state_path(home: Path) -> Path:
-    return home / "update-state.json"
-
-
-def _load_update_state(path: Path) -> tuple[float, str | None]:
-    if not path.is_file():
-        return 0.0, None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return 0.0, None
-    if not isinstance(data, dict):
-        return 0.0, None
-    raw_checked = data.get("last_checked_at")
-    checked = float(raw_checked) if isinstance(raw_checked, (int, float)) else 0.0
-    raw_latest = data.get("latest_version")
-    latest = str(raw_latest) if isinstance(raw_latest, str) and raw_latest else None
-    return checked, latest
-
-
-def _write_update_state(path: Path, checked_at: float, latest_version: str | None) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(
-            {
-                "last_checked_at": checked_at,
-                "latest_version": latest_version,
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
-
-
-def automatic_update_due(home: Path, *, now: float | None = None) -> bool:
-    current_time = time.time() if now is None else now
-    checked_at, _ = _load_update_state(update_state_path(home))
-    return current_time - checked_at >= AUTO_UPDATE_INTERVAL_SECONDS
-
-
 def run_automatic_update(
     mode: str,
-    home: Path,
     current_version: str,
     *,
-    now: float | None = None,
     token: str | None = None,
     client_factory: Callable[[str | None], httpx.Client] = github_client,
     installer: Callable[[ReleaseInfo, httpx.Client], None] = install_release,
 ) -> AutomaticUpdateResult:
+    """Check on every installed invocation; optionally install without prompting."""
     normalized = mode.strip().lower()
     if normalized == "off":
         return AutomaticUpdateResult()
-    if normalized not in {"check", "install"}:
+    if normalized not in {"check", "prompt", "install"}:
         return AutomaticUpdateResult(error=f"invalid automatic update mode: {mode}")
     if os.getenv("SYNCTIFY_INSTALLED") != "1" or os.getenv("SYNCTIFY_SKIP_AUTO_UPDATE") == "1":
-        return AutomaticUpdateResult()
-
-    checked_at = time.time() if now is None else now
-    if not automatic_update_due(home, now=checked_at):
         return AutomaticUpdateResult()
 
     resolved_token = token if token is not None else resolve_github_token()
@@ -356,11 +306,6 @@ def run_automatic_update(
     except (OSError, httpx.HTTPError) as exc:
         error = str(exc)
 
-    latest = release.version if release is not None else None
-    try:
-        _write_update_state(update_state_path(home), checked_at, latest)
-    except OSError:
-        pass
     return AutomaticUpdateResult(
         checked=True,
         release=release,
