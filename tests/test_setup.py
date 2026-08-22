@@ -67,6 +67,22 @@ def test_run_setup_initializes_state_and_persists_defaults(tmp_path: Path) -> No
     assert version == "5"
 
 
+def test_run_setup_uses_custom_library_without_creating_default(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    custom_library = tmp_path / "existing-music"
+
+    report = run_setup(
+        settings,
+        SetupOptions(library_dir=str(custom_library)),
+        which=lambda _: None,
+    )
+
+    assert report.settings.library_dir == custom_library
+    assert custom_library.is_dir()
+    assert not settings.library_dir.exists()
+    assert load_user_config(settings.home).library_dir == str(custom_library)
+
+
 def test_setup_targets_are_idempotent(tmp_path: Path) -> None:
     settings = settings_for(tmp_path)
     mirror = tmp_path / "phone"
@@ -121,6 +137,7 @@ def test_setup_requires_complete_target_pairs(tmp_path: Path) -> None:
 
 def test_setup_cli_non_interactive_is_scriptable(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "scripted"
+    library = tmp_path / "Music"
     monkeypatch.setenv("SYNCTIFY_HOME", str(home))
 
     result = CliRunner().invoke(
@@ -128,6 +145,8 @@ def test_setup_cli_non_interactive_is_scriptable(monkeypatch, tmp_path: Path) ->
         [
             "setup",
             "--non-interactive",
+            "--library",
+            str(library),
             "--sources",
             "qobuz,tidal",
             "--qobuz-dl",
@@ -141,11 +160,15 @@ def test_setup_cli_non_interactive_is_scriptable(monkeypatch, tmp_path: Path) ->
 
     assert result.exit_code == 0, result.output
     assert "Synctify setup" in result.stdout
+    assert f"Library:   {library}" in result.stdout
     assert "Setup complete" in result.stdout
     config = load_user_config(home)
     assert config.source_priority == ("qobuz", "tidal")
     assert config.qobuz_dl == "/custom/qobuz-dl"
     assert config.streamrip == "/custom/rip"
+    assert config.library_dir == str(library)
+    assert library.is_dir()
+    assert not (home / "library").exists()
     assert (home / "synctify.sqlite3").exists()
 
 
