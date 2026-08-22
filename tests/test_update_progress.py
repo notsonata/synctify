@@ -41,6 +41,8 @@ def test_update_workflow_exposes_real_stage_messages() -> None:
     workflow = (ROOT / "src" / "synctify" / "workflow.py").read_text(encoding="utf-8")
 
     assert "Resolving {len(pending)} track(s) via {source}..." in workflow
+    assert "Resolving via {source} [{index}/{total}]" in workflow
+    assert "Skipping {source}: {exc}" in workflow
     assert "Planning downloads..." in workflow
     assert "Checking playlist readiness..." in workflow
     assert "Building playlists..." in workflow
