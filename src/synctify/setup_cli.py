@@ -41,6 +41,12 @@ def setup_command(
         "--non-interactive",
         help="Do not prompt. Apply only explicitly supplied values and existing defaults.",
     ),
+    library_dir: str | None = typer.Option(
+        None,
+        "--library",
+        "--library-dir",
+        help="Canonical FLAC library directory to save. Must be an absolute path.",
+    ),
     source_priority: str | None = typer.Option(
         None,
         "--sources",
@@ -131,6 +137,12 @@ def setup_command(
         typer.echo(f"Home: {settings.home}")
         typer.echo("")
 
+        current_library = str(settings.library_dir)
+        selected_library = _prompt_text("Music library", current_library, library_dir)
+        # Accepting the displayed default should not turn the home-relative
+        # built-in into a pinned absolute override. An explicitly different path
+        # is persisted and reused by all later commands/TUI launches.
+        library_dir = None if library_dir is None and selected_library == current_library else selected_library
         source_priority = _prompt_text(
             "Source priority",
             ",".join(current.source_priority),
@@ -210,6 +222,7 @@ def setup_command(
         mirror_destination=mirror_destination,
         backup_name=backup_name,
         backup_destination=backup_destination,
+        library_dir=library_dir,
     )
     try:
         report = run_setup(settings, options)
@@ -222,7 +235,7 @@ def setup_command(
     should_login = bool(spotify_login) if spotify_login is not None else False
     if should_login:
         try:
-            spotify_config = load_spotify_config(settings)
+            spotify_config = load_spotify_config(report.settings)
             if spotify_config is None:
                 raise SpotifyAuthError(
                     "Spotify login was requested but no Client ID is configured."
