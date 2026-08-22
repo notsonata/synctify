@@ -5,6 +5,7 @@ import sqlite3
 from typing import Sequence
 
 from .auto_resolution import CatalogSearchProvider
+from .local_reconcile import reconcile_confirmed_local_tracks
 from .spotify.state import ChangePlan
 from .workflow import (
     AcquisitionProviderFactory,
@@ -24,11 +25,31 @@ def _unchanged_spotify_plan() -> ChangePlan:
     return ChangePlan((), (), (), (), 0, 0, 0, ())
 
 
+def _reconcile_local_library(
+    connection: sqlite3.Connection,
+    library_dir: Path,
+    progress: ProgressReporter | None,
+) -> None:
+    _notify(progress, "Matching confirmed tracks against the local FLAC library...")
+    report = reconcile_confirmed_local_tracks(connection, library_dir)
+    if report.desired == 0:
+        _notify(progress, "No confirmed tracks are waiting for local matching.")
+        return
+    _notify(
+        progress,
+        "Local FLAC match: "
+        f"{report.reused} recorded path(s) reused, "
+        f"{report.matched} existing FLAC(s) matched, "
+        f"{report.stale_cleared} stale path(s) cleared.",
+    )
+
+
 def preview_library_update_workflow(
     connection: sqlite3.Connection,
     search_provider: CatalogSearchProvider,
     resolve_sources: str | Sequence[str],
     acquisition_provider_factory: AcquisitionProviderFactory,
+    library_dir: Path,
     *,
     search_results: int = 10,
     resolution_limit: int | None = None,
@@ -38,6 +59,7 @@ def preview_library_update_workflow(
     _notify(progress, "Planning current Synctify library in dry-run sandbox...")
     connection.execute("SAVEPOINT synctify_library_update_preview")
     try:
+        _reconcile_local_library(connection, library_dir, progress)
         resolution_sources, resolutions = _run_resolution_priority(
             connection,
             search_provider,
@@ -85,6 +107,9 @@ def run_library_update_workflow(
 ) -> UpdateWorkflowReport:
     """Resolve/acquire/rebuild only the playlists already confirmed in Synctify."""
     _notify(progress, "Using confirmed Synctify desired state. Spotify is not fetched by this command.")
+    _reconcile_local_library(connection, library_dir, progress)
+    connection.commit()
+
     resolution_sources, resolutions = _run_resolution_priority(
         connection,
         search_provider,
