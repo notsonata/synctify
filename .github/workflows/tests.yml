@@ -32,4 +32,16 @@ jobs:
           .venv-smoke/bin/python -m pip install dist/synctify-*.whl
           .venv-smoke/bin/synctify --help
           .venv-smoke/bin/synctify tui --help
-          .venv-smoke/bin/python -c 'import synctify; assert synctify.__version__ == "1.0.0"'
+          .venv-smoke/bin/python -c 'import synctify; assert synctify.__version__ == "1.0.1"'
+      - name: Build macOS distribution bundle
+        run: python scripts/build_distribution.py --dist-dir dist
+      - name: Smoke test macOS distribution bundle
+        run: |
+          VERSION="$(python -c 'import synctify; print(synctify.__version__)')"
+          BUNDLE="synctify-${VERSION}-macos"
+          rm -rf .dist-smoke
+          mkdir .dist-smoke
+          unzip -q "dist/${BUNDLE}.zip" -d .dist-smoke
+          test -x ".dist-smoke/${BUNDLE}/synctify.sh"
+          SYNCTIFY_PYTHON="$(command -v python)" ".dist-smoke/${BUNDLE}/synctify.sh" --help
+          SYNCTIFY_PYTHON="$(command -v python)" ".dist-smoke/${BUNDLE}/synctify.sh" tui --help
