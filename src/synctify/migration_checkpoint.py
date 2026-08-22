@@ -287,10 +287,10 @@ def load_checkpoint(path: Path) -> MigrationCheckpoint | None:
 
 
 def save_checkpoint(path: Path, checkpoint: MigrationCheckpoint) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint.updated_at = _now()
     temporary = path.with_name(f".{path.name}.tmp")
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(
             json.dumps(checkpoint_to_dict(checkpoint), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -324,8 +324,9 @@ def mark_stage_completed(
         operational_failures=operational_failures,
         summary=dict(summary or {}),
     )
-    checkpoint.last_error_stage = None
-    checkpoint.last_error = None
+    if checkpoint.last_error_stage == stage:
+        checkpoint.last_error_stage = None
+        checkpoint.last_error = None
 
 
 def record_stage_error(checkpoint: MigrationCheckpoint, stage: str, error: str) -> None:
