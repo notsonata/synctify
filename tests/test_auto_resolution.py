@@ -176,6 +176,30 @@ def test_limit_applies_before_search(tmp_path: Path) -> None:
     assert all(call[2] == 4 for call in search.calls)
 
 
+def test_auto_resolution_reports_each_track_before_search(tmp_path: Path) -> None:
+    database = tmp_path / "state.sqlite3"
+    initialize(database)
+    search = FakeSearch([])
+    progress: list[tuple[str, int, int, str]] = []
+
+    with connect(database) as connection:
+        _insert_track(connection, "spotify-1", title="A")
+        _insert_track(connection, "spotify-2", title="B")
+        auto_resolve_tracks(
+            connection,
+            search,
+            "qobuz",
+            progress=lambda source, current, total, track: progress.append(
+                (source, current, total, track.spotify_id)
+            ),
+        )
+
+    assert progress == [
+        ("qobuz", 1, 2, "spotify-1"),
+        ("qobuz", 2, 2, "spotify-2"),
+    ]
+
+
 def test_search_failure_is_reported_without_stopping_remaining_tracks(tmp_path: Path) -> None:
     database = tmp_path / "state.sqlite3"
     initialize(database)
