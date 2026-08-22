@@ -6,7 +6,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
+import tomllib
 from typing import Callable, Sequence
+
+from platformdirs import user_config_dir
 
 from ..models import Track
 from ..resolution import Candidate, normalize_isrc
@@ -25,6 +29,7 @@ class StreamripSearchConfig:
     executable: str = "rip"
     extra_args: tuple[str, ...] = ()
     results_per_query: int = 10
+    config_path: Path | None = None
 
 
 class StreamripCatalogSearch:
@@ -52,6 +57,53 @@ class StreamripCatalogSearch:
         if not self.is_available():
             raise StreamripUnavailableError(
                 f"{self.config.executable!r} was not found on PATH. Install streamrip first: {STREAMRIP_REPOSITORY}"
+            )
+
+    def _streamrip_config_path(self) -> Path:
+        if self.config.config_path is not None:
+            return self.config.config_path.expanduser()
+        return Path(user_config_dir("streamrip")) / "config.toml"
+
+    def require_noninteractive_source_ready(self, source: str) -> None:
+        """Refuse provider flows that could launch an interactive login browser."""
+        normalized_source = source.strip().lower()
+        if normalized_source != "tidal":
+            return
+
+        config_path = self._streamrip_config_path()
+        try:
+            with config_path.open("rb") as handle:
+                payload = tomllib.load(handle)
+        except FileNotFoundError as exc:
+            raise StreamripSearchError(
+                "Streamrip Tidal is not configured. Run `rip config --tidal` in Terminal, "
+                "complete login once, then retry Synctify."
+            ) from exc
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise StreamripSearchError(
+                f"could not read Streamrip config {config_path}: {exc}"
+            ) from exc
+
+        tidal = payload.get("tidal")
+        if not isinstance(tidal, dict):
+            raise StreamripSearchError(
+                "Streamrip Tidal is not configured. Run `rip config --tidal` in Terminal, "
+                "complete login once, then retry Synctify."
+            )
+
+        access_token = str(tidal.get("access_token") or "").strip()
+        refresh_token = str(tidal.get("refresh_token") or "").strip()
+        raw_expiry = tidal.get("token_expiry")
+        try:
+            token_expiry = float(raw_expiry)
+        except (TypeError, ValueError):
+            token_expiry = 0.0
+
+        if not access_token or not refresh_token or token_expiry <= time.time() + 60:
+            raise StreamripSearchError(
+                "Streamrip Tidal login is missing or expired. Run `rip config --tidal` in Terminal "
+                "and complete authentication before using Tidal in Synctify. Synctify will not "
+                "open provider login pages during automatic resolution."
             )
 
     def build_search_command(
@@ -123,6 +175,7 @@ class StreamripCatalogSearch:
 
             result = self._runner(
                 self.build_search_command(source, query, output_path, limit=limit),
+                stdin=subprocess.DEVNULL,
                 text=True,
                 capture_output=True,
                 check=False,
@@ -173,6 +226,7 @@ class StreamripCatalogSearch:
                 f"streamrip search source {source!r} is unsupported; choose one of: {supported}"
             )
         self.require_available()
+        self.require_noninteractive_source_ready(normalized_source)
         selected_limit = self.config.results_per_query if limit is None else limit
 
         normalized_track_isrc = normalize_isrc(track.isrc)
