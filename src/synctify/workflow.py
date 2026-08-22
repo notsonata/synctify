@@ -69,6 +69,7 @@ class UpdateWorkflowReport:
     playlist_readiness: PlaylistReadiness | None
     playlists: PlaylistBuildReport | None
     dry_run: bool
+    allow_partial: bool = False
 
     @property
     def resolution(self) -> AutoResolutionReport:
@@ -97,8 +98,18 @@ class UpdateWorkflowReport:
         return len(failed_ids - resolved_ids)
 
     @property
+    def strict_playlist_failures(self) -> int:
+        if self.dry_run or self.allow_partial or self.playlists is None:
+            return 0
+        return self.playlists.incomplete
+
+    @property
     def operational_failures(self) -> int:
-        return self.resolution_failures + sum(group.failed for group in self.acquisitions)
+        return (
+            self.resolution_failures
+            + sum(group.failed for group in self.acquisitions)
+            + self.strict_playlist_failures
+        )
 
 
 def normalize_source_priority(sources: str | Sequence[str]) -> tuple[str, ...]:
@@ -325,6 +336,7 @@ def run_update_workflow(
         playlist_readiness=None,
         playlists=playlists,
         dry_run=False,
+        allow_partial=allow_partial,
     )
 
 
