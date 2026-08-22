@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Callable
 
@@ -10,6 +9,7 @@ from typer.testing import CliRunner
 
 import synctify.app as app_module
 import synctify.self_update as self_update
+import synctify.self_update_cli as self_update_cli
 from synctify.app import app
 from synctify.self_update import AutomaticUpdateResult, ReleaseInfo, UpdateError
 
@@ -35,6 +35,15 @@ def _client_factory(
         return httpx.Client(transport=httpx.MockTransport(handler))
 
     return factory
+
+
+def _available_release() -> ReleaseInfo:
+    return ReleaseInfo(
+        version="1.0.6",
+        tag="v1.0.6",
+        asset_name="synctify-1.0.6-macos.zip",
+        asset_api_url="https://api.github.com/assets/123",
+    )
 
 
 def test_find_update_uses_latest_stable_macos_release_asset() -> None:
@@ -145,18 +154,66 @@ def test_automatic_update_is_disabled_for_portable_or_development_runs(
     assert called is False
 
 
+def test_self_update_check_reports_without_installing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = _available_release()
+    installed = False
+
+    monkeypatch.setattr(self_update_cli, "resolve_github_token", lambda: None)
+    monkeypatch.setattr(
+        self_update_cli,
+        "github_client",
+        lambda _token: httpx.Client(transport=httpx.MockTransport(lambda _r: httpx.Response(500))),
+    )
+    monkeypatch.setattr(self_update_cli, "find_update", lambda current, client: release)
+
+    def fail_install(_release: ReleaseInfo, _client: httpx.Client) -> None:
+        nonlocal installed
+        installed = True
+        raise AssertionError("--check must not install")
+
+    monkeypatch.setattr(self_update_cli, "install_release", fail_install)
+    result = CliRunner().invoke(app, ["self-update", "--check"])
+
+    assert result.exit_code == 0
+    assert "Synctify 1.0.6 is available (current: 1.0.5)." in result.output
+    assert installed is False
+
+
+def test_explicit_self_update_installs_available_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = _available_release()
+    installed: list[str] = []
+
+    monkeypatch.setattr(self_update_cli, "resolve_github_token", lambda: None)
+    monkeypatch.setattr(
+        self_update_cli,
+        "github_client",
+        lambda _token: httpx.Client(transport=httpx.MockTransport(lambda _r: httpx.Response(500))),
+    )
+    monkeypatch.setattr(self_update_cli, "find_update", lambda current, client: release)
+    monkeypatch.setattr(
+        self_update_cli,
+        "install_release",
+        lambda selected, client: installed.append(selected.version),
+    )
+
+    result = CliRunner().invoke(app, ["self-update"])
+
+    assert result.exit_code == 0
+    assert installed == ["1.0.6"]
+    assert "Synctify updated to 1.0.6." in result.output
+
+
 def test_noninteractive_cli_notifies_without_prompting(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("SYNCTIFY_INSTALLED", "1")
     monkeypatch.setenv("SYNCTIFY_HOME", str(tmp_path))
-    release = ReleaseInfo(
-        version="1.0.6",
-        tag="v1.0.6",
-        asset_name="synctify-1.0.6-macos.zip",
-        asset_api_url="https://api.github.com/assets/123",
-    )
+    release = _available_release()
     monkeypatch.setattr(app_module, "_interactive_terminal", lambda: False)
     monkeypatch.setattr(
         app_module,
@@ -180,12 +237,7 @@ def test_interactive_default_policy_prompts_before_installing(
 ) -> None:
     monkeypatch.setenv("SYNCTIFY_INSTALLED", "1")
     monkeypatch.setenv("SYNCTIFY_HOME", str(tmp_path))
-    release = ReleaseInfo(
-        version="1.0.6",
-        tag="v1.0.6",
-        asset_name="synctify-1.0.6-macos.zip",
-        asset_api_url="https://api.github.com/assets/123",
-    )
+    release = _available_release()
     monkeypatch.setattr(app_module, "_interactive_terminal", lambda: True)
     monkeypatch.setattr(
         app_module,
