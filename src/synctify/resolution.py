@@ -89,11 +89,6 @@ def _gross_duration_mismatch(track: Track, candidate: Candidate) -> bool:
     )
 
 
-def _has_verifying_metadata(candidate: Candidate) -> bool:
-    """Require more than a displayed title/artist pair for automatic persistence."""
-    return bool(normalize_isrc(candidate.isrc) or candidate.album or candidate.duration_ms is not None)
-
-
 def metadata_score(track: Track, candidate: Candidate) -> float:
     weighted: list[tuple[float, float]] = [
         (0.45, _similarity(track.title, candidate.title)),
@@ -172,18 +167,8 @@ def resolve_track(
             "exact ISRC match",
         )
 
-    verifiable = tuple(candidate for candidate in candidates if _has_verifying_metadata(candidate))
-    if not verifiable:
-        return Resolution(
-            ResolutionStatus.UNRESOLVED,
-            None,
-            MatchMethod.METADATA,
-            0.0,
-            "candidates contain only title and artist; additional metadata is required for automatic matching",
-        )
-
     plausible = tuple(
-        candidate for candidate in verifiable if not _gross_duration_mismatch(track, candidate)
+        candidate for candidate in candidates if not _gross_duration_mismatch(track, candidate)
     )
     if not plausible:
         return Resolution(
