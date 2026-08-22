@@ -55,16 +55,15 @@ jobs:
           test -x ".dist-release/${BUNDLE}/synctify.sh"
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" --help >/dev/null
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" tui --help >/dev/null
-      - name: Generate checksums
-        run: |
-          cd dist
-          shasum -a 256 * > SHA256SUMS
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          BUNDLE="synctify-${VERSION}-macos"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/${BUNDLE}.zip" \
+            "dist/synctify-${VERSION}.tar.gz" \
             --verify-tag \
             --title "Synctify $VERSION" \
             --notes-file release-notes.md
