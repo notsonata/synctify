@@ -54,6 +54,18 @@ def _track_candidate(row: sqlite3.Row, library_dir: Path) -> CollectibleTrack:
     recorded = Path(row["local_path"]).expanduser()
     root = library_dir.expanduser().resolve()
 
+    if recorded.is_symlink():
+        return CollectibleTrack(
+            spotify_id=row["spotify_id"],
+            title=row["title"],
+            artist=row["artist"],
+            path=recorded,
+            size_bytes=None,
+            exists=True,
+            safe_to_delete=False,
+            reason="recorded local path is a symbolic link; refusing to delete through it",
+        )
+
     try:
         resolved = recorded.resolve(strict=False)
     except OSError as exc:
