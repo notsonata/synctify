@@ -8,6 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXED_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
+REGULAR_FILE = 0o100000
 
 
 def project_version(root: Path) -> str:
@@ -25,7 +26,7 @@ def _write_bytes(
     info = ZipInfo(name, date_time=FIXED_TIMESTAMP)
     info.create_system = 3
     info.compress_type = ZIP_DEFLATED
-    info.external_attr = (mode & 0xFFFF) << 16
+    info.external_attr = (REGULAR_FILE | (mode & 0o777)) << 16
     archive.writestr(info, data)
 
 
