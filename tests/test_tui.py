@@ -123,6 +123,7 @@ def test_cli_command_runner_uses_existing_app_and_streams_output(
     assert seen["command"][-4:] == ["-m", "synctify.app", "spotify", "pull"]
     environment = seen["kwargs"]["env"]
     assert environment["SYNCTIFY_HOME"] == str(settings.home)
+    assert environment["SYNCTIFY_LIBRARY_DIR"] == str(settings.library_dir)
     assert environment["SYNCTIFY_SKIP_AUTO_UPDATE"] == "1"
     assert output == ["first line", "second line"]
 
