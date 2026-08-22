@@ -263,7 +263,7 @@ def test_unimport_cleanup_does_not_sweep_unrelated_orphans(tmp_path: Path) -> No
         assert unrelated.exists()
 
 
-def test_schema_migrates_existing_imports_into_tracked_catalog(tmp_path: Path) -> None:
+def test_schema_migrates_existing_imports_into_reviewable_catalog(tmp_path: Path) -> None:
     database = tmp_path / "synctify.sqlite3"
     initialize(database)
     with connect(database) as connection:
@@ -285,9 +285,14 @@ def test_schema_migrates_existing_imports_into_tracked_catalog(tmp_path: Path) -
         schema = connection.execute(
             "SELECT value FROM metadata WHERE key = 'schema_version'"
         ).fetchone()["value"]
-        assert schema == "6"
+        assert schema == "7"
         catalog = {item.spotify_id: item for item in list_playlist_catalog(connection)}
-        assert catalog["playlist-1"].tracked
+        assert not catalog["playlist-1"].tracked
+        assert catalog["playlist-1"].pending_add == 1
         items = list_playlist_items(connection, "playlist-1")
         assert len(items) == 1
-        assert items[0].state == "included"
+        assert items[0].state == "pending_add"
+        active = connection.execute(
+            "SELECT COUNT(*) FROM playlists WHERE spotify_id = 'playlist-1'"
+        ).fetchone()[0]
+        assert active == 0
