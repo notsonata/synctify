@@ -14,7 +14,7 @@ from synctify.app import app
 from synctify.self_update import AutomaticUpdateResult, ReleaseInfo, UpdateError
 
 
-def _release_response(version: str = "1.0.7") -> dict[str, object]:
+def _release_response(version: str = "1.1.1") -> dict[str, object]:
     return {
         "tag_name": f"v{version}",
         "assets": [
@@ -39,9 +39,9 @@ def _client_factory(
 
 def _available_release() -> ReleaseInfo:
     return ReleaseInfo(
-        version="1.0.7",
-        tag="v1.0.7",
-        asset_name="synctify-1.0.7-macos.zip",
+        version="1.1.1",
+        tag="v1.1.1",
+        asset_name="synctify-1.1.1-macos.zip",
         asset_api_url="https://api.github.com/assets/123",
     )
 
@@ -52,20 +52,20 @@ def test_find_update_uses_latest_stable_macos_release_asset() -> None:
         return httpx.Response(200, json=_release_response())
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        release = self_update.find_update("1.0.6", client)
+        release = self_update.find_update("1.1.0", client)
 
     assert release is not None
-    assert release.version == "1.0.7"
-    assert release.tag == "v1.0.7"
-    assert release.asset_name == "synctify-1.0.7-macos.zip"
+    assert release.version == "1.1.1"
+    assert release.tag == "v1.1.1"
+    assert release.asset_name == "synctify-1.1.1-macos.zip"
 
 
 def test_find_update_returns_none_when_current_is_latest() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=_release_response("1.0.6"))
+        return httpx.Response(200, json=_release_response("1.1.0"))
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        assert self_update.find_update("1.0.6", client) is None
+        assert self_update.find_update("1.1.0", client) is None
 
 
 def test_private_release_error_explains_github_authentication() -> None:
@@ -91,20 +91,20 @@ def test_automatic_update_checks_on_every_installed_invocation(
     factory = _client_factory(handler)
     first = self_update.run_automatic_update(
         "prompt",
-        "1.0.6",
+        "1.1.0",
         token="token",
         client_factory=factory,
     )
     second = self_update.run_automatic_update(
         "prompt",
-        "1.0.6",
+        "1.1.0",
         token="token",
         client_factory=factory,
     )
 
     assert calls == 2
-    assert first.release is not None and first.release.version == "1.0.7"
-    assert second.release is not None and second.release.version == "1.0.7"
+    assert first.release is not None and first.release.version == "1.1.1"
+    assert second.release is not None and second.release.version == "1.1.1"
     assert first.installed is False
     assert second.installed is False
 
@@ -123,14 +123,14 @@ def test_automatic_install_mode_installs_available_release(
 
     result = self_update.run_automatic_update(
         "install",
-        "1.0.6",
+        "1.1.0",
         token="token",
         client_factory=_client_factory(handler),
         installer=installer,
     )
 
     assert result.installed is True
-    assert installed == ["1.0.7"]
+    assert installed == ["1.1.1"]
 
 
 def test_automatic_update_is_disabled_for_portable_or_development_runs(
@@ -146,7 +146,7 @@ def test_automatic_update_is_disabled_for_portable_or_development_runs(
 
     result = self_update.run_automatic_update(
         "prompt",
-        "1.0.6",
+        "1.1.0",
         client_factory=factory,
     )
 
@@ -177,7 +177,7 @@ def test_self_update_check_reports_without_installing(
     result = CliRunner().invoke(app, ["self-update", "--check"])
 
     assert result.exit_code == 0
-    assert "Synctify 1.0.7 is available (current: 1.0.6)." in result.output
+    assert "Synctify 1.1.1 is available (current: 1.1.0)." in result.output
     assert installed is False
 
 
@@ -203,8 +203,8 @@ def test_explicit_self_update_installs_available_release(
     result = CliRunner().invoke(app, ["self-update"])
 
     assert result.exit_code == 0
-    assert installed == ["1.0.7"]
-    assert "Synctify updated to 1.0.7." in result.output
+    assert installed == ["1.1.1"]
+    assert "Synctify updated to 1.1.1." in result.output
 
 
 def test_noninteractive_cli_notifies_without_prompting(
@@ -227,7 +227,7 @@ def test_noninteractive_cli_notifies_without_prompting(
     monkeypatch.setattr(app_module.typer, "confirm", fail_confirm)
     result = CliRunner().invoke(app, ["status"])
 
-    assert "Synctify 1.0.7 is available" in result.output
+    assert "Synctify 1.1.1 is available" in result.output
     assert "Run `synctify self-update`" in result.output
 
 
@@ -255,4 +255,4 @@ def test_interactive_default_policy_prompts_before_installing(
     result = CliRunner().invoke(app, ["status"])
 
     assert result.exit_code == 1
-    assert prompts == ["Synctify 1.0.7 is available (current: 1.0.6). Update now?"]
+    assert prompts == ["Synctify 1.1.1 is available (current: 1.1.0). Update now?"]
