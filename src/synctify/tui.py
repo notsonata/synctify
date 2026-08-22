@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 import threading
 
@@ -13,6 +14,7 @@ from textual.widgets import (
     Header,
     Input,
     LoadingIndicator,
+    ProgressBar,
     RichLog,
     Static,
     TabbedContent,
@@ -45,6 +47,12 @@ from .tui_backend import (
 )
 
 
+_UPDATE_PROGRESS_RE = re.compile(
+    r"^\[update\]\s+Resolving via (?P<source>\S+) "
+    r"\[(?P<current>\d+)/(?P<total>\d+)\]\s+(?P<label>.+)$"
+)
+
+
 class SynctifyTUI(App[None]):
     """Interactive terminal frontend for Synctify state and staged Spotify selection."""
 
@@ -72,9 +80,11 @@ class SynctifyTUI(App[None]):
     #resolver-form Input { margin-bottom: 1; }
     #command-row { height: auto; margin-bottom: 1; }
     #command-input { width: 1fr; margin-right: 1; }
-    #busy-row { dock: bottom; height: 3; padding: 0 2; background: $boost; }
-    #busy-indicator { width: 8; display: none; }
-    #busy-label { width: 1fr; content-align: left middle; }
+    #busy-row { dock: bottom; height: 4; padding: 0 2; background: $boost; }
+    #busy-indicator { width: 6; display: none; }
+    #busy-stack { width: 1fr; height: 3; }
+    #busy-label { height: 1; content-align: left middle; }
+    #busy-progress { height: 1; display: none; margin-top: 1; }
     #cancel-action { width: 14; }
     #selected-track, #doctor-summary, #audit-summary { height: auto; }
     """
@@ -199,7 +209,14 @@ class SynctifyTUI(App[None]):
 
         with Horizontal(id="busy-row"):
             yield LoadingIndicator(id="busy-indicator")
-            yield Static("Ready", id="busy-label")
+            with Vertical(id="busy-stack"):
+                yield Static("Ready", id="busy-label")
+                yield ProgressBar(
+                    total=100,
+                    show_eta=False,
+                    show_percentage=True,
+                    id="busy-progress",
+                )
             yield Button("Cancel (Esc)", id="cancel-action", variant="error", disabled=True)
         yield Footer()
 
@@ -236,12 +253,36 @@ class SynctifyTUI(App[None]):
     def _set_status(self, message: str) -> None:
         self.query_one("#busy-label", Static).update(message)
 
+    def _show_indeterminate_status(self, message: str) -> None:
+        progress = self.query_one("#busy-progress", ProgressBar)
+        progress.display = False
+        self.query_one("#busy-indicator", LoadingIndicator).display = self._operation_running
+        self._set_status(message)
+
+    def _show_resolution_progress(
+        self,
+        source: str,
+        current: int,
+        total: int,
+        label: str,
+    ) -> None:
+        self.query_one("#busy-indicator", LoadingIndicator).display = False
+        progress = self.query_one("#busy-progress", ProgressBar)
+        progress.display = True
+        progress.update(total=total, progress=current)
+        self._set_status(
+            f"{source.title()} resolution {current}/{total} · {label} · Esc cancels"
+        )
+
     def _set_busy(self, label: str) -> bool:
         if self._operation_running:
             self.notify("Another Synctify action is already running.", severity="warning")
             return False
         self._operation_running = True
         self._cancel_event.clear()
+        progress = self.query_one("#busy-progress", ProgressBar)
+        progress.update(total=100, progress=0)
+        progress.display = False
         self.query_one("#busy-indicator", LoadingIndicator).display = True
         self.query_one("#cancel-action", Button).disabled = False
         for button in self.query(Button):
@@ -253,6 +294,9 @@ class SynctifyTUI(App[None]):
     def _clear_busy(self, message: str) -> None:
         self._operation_running = False
         self.query_one("#busy-indicator", LoadingIndicator).display = False
+        progress = self.query_one("#busy-progress", ProgressBar)
+        progress.display = False
+        progress.update(total=100, progress=0)
         self.query_one("#cancel-action", Button).disabled = True
         for button in self.query(Button):
             if button.id != "cancel-action":
@@ -264,7 +308,7 @@ class SynctifyTUI(App[None]):
             return
         self._cancel_event.set()
         self.query_one("#cancel-action", Button).disabled = True
-        self._set_status("Cancelling current action…")
+        self._show_indeterminate_status("Cancelling current action…")
 
     def _render_dashboard(self, state: DashboardState) -> None:
         if not state.initialized:
@@ -398,7 +442,7 @@ class SynctifyTUI(App[None]):
         self.query_one("#tabs", TabbedContent).active = tab
 
     def action_start_update(self) -> None:
-        self._start_command(("update",), "Library update")
+        self._start_command(("update",), "Library update", show_commands=False)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         key = event.row_key.value
@@ -506,7 +550,10 @@ class SynctifyTUI(App[None]):
         self.refresh_core()
 
     def _progress_from_thread(self, message: str) -> None:
-        self.call_from_thread(self._set_status, f"{message}  Esc cancels")
+        self.call_from_thread(
+            self._show_indeterminate_status,
+            f"{message}  Esc cancels",
+        )
 
     @work(thread=True, exclusive=True, group="spotify", exit_on_error=False)
     def fetch_spotify_catalog_worker(self) -> None:
@@ -565,6 +612,17 @@ class SynctifyTUI(App[None]):
 
     def _append_command_output(self, line: str) -> None:
         self.query_one("#command-log", RichLog).write(line)
+        progress_match = _UPDATE_PROGRESS_RE.match(line)
+        if progress_match is not None and self._operation_running:
+            self._show_resolution_progress(
+                progress_match.group("source"),
+                int(progress_match.group("current")),
+                int(progress_match.group("total")),
+                progress_match.group("label"),
+            )
+            return
+        if line.startswith("[update] ") and self._operation_running:
+            self._show_indeterminate_status(f"{line[len('[update] '):]}  Esc cancels")
 
     def _run_custom_command(self) -> None:
         raw = self.query_one("#command-input", Input).value.strip()
@@ -578,7 +636,13 @@ class SynctifyTUI(App[None]):
             return
         self._start_command(args, "Command")
 
-    def _start_command(self, args: tuple[str, ...], label: str) -> None:
+    def _start_command(
+        self,
+        args: tuple[str, ...],
+        label: str,
+        *,
+        show_commands: bool = True,
+    ) -> None:
         if not args:
             self.notify("Command arguments are required.", severity="warning")
             return
@@ -587,7 +651,8 @@ class SynctifyTUI(App[None]):
             return
         if not self._set_busy(label):
             return
-        self.action_show_tab("commands")
+        if show_commands:
+            self.action_show_tab("commands")
         log = self.query_one("#command-log", RichLog)
         log.clear()
         log.write(f"$ synctify {shlex.join(args)}")
