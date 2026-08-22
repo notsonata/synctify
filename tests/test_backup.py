@@ -46,7 +46,7 @@ def test_add_rclone_backup_target_requires_remote_syntax(tmp_path: Path) -> None
             add_rclone_backup_target(connection, "bad", "/tmp/not-a-remote")
 
 
-def test_backup_commands_never_sync_the_library(tmp_path: Path) -> None:
+def test_backup_commands_never_delete_remote_objects(tmp_path: Path) -> None:
     database, library, playlists = _setup(tmp_path)
     with connect(database) as connection:
         target = add_rclone_backup_target(connection, "pcloud", "pcloud:MusicBackup")
@@ -64,8 +64,9 @@ def test_backup_commands_never_sync_the_library(tmp_path: Path) -> None:
     assert commands[1][1][1] == "copyto"
     assert "playlists/snapshots/Driving/2026-08-21T150000Z.m3u8" in commands[1][1][3]
     assert commands[-1][0] == "playlists-current"
-    assert commands[-1][1][1] == "sync"
+    assert commands[-1][1][1] == "copy"
     assert commands[-1][1][3] == "pcloud:MusicBackup/playlists/current"
+    assert all(command[1] != "sync" for _label, command in commands)
 
 
 def test_successful_backup_records_snapshot_and_skips_unchanged_history(
@@ -115,6 +116,7 @@ def test_successful_backup_records_snapshot_and_skips_unchanged_history(
     assert snapshot_count == 1
     assert run_count == 2
     assert [command[1] for command in calls].count("copyto") == 1
+    assert all(command[1] != "sync" for command in calls)
 
 
 def test_playlist_change_creates_a_new_snapshot(
