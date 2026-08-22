@@ -25,10 +25,13 @@ from .workflow import (
 
 
 def _fetch_update_snapshot(settings: Settings) -> SpotifySnapshot:
+    typer.echo("[update] Fetching Spotify desired state...", err=True)
     config = SpotifyOAuthConfig.load(settings.spotify_config_path)
     auth = SpotifyAuth(config)
     with SpotifyClient(auth) as client:
-        return fetch_spotify_snapshot(client)
+        snapshot = fetch_spotify_snapshot(client)
+    typer.echo("[update] Spotify desired state fetched.", err=True)
+    return snapshot
 
 
 def _update_acquisition_provider(

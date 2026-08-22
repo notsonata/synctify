@@ -14,7 +14,7 @@ def test_release_version_is_consistent() -> None:
     version = pyproject["project"]["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert version == "1.1.0"
+    assert version == "1.0.6"
     assert synctify.__version__ == version
     assert f"**Current version: {version}**" in readme
 
@@ -40,13 +40,13 @@ def test_readme_describes_current_automatic_resolution_contract() -> None:
 def test_readme_documents_release_zip_launcher() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "synctify-1.1.0-macos.zip" in readme
+    assert "synctify-1.0.6-macos.zip" in readme
     assert "./synctify.sh" in readme
     assert "./synctify.sh install" in readme
     assert "~/.local/bin/synctify" in readme
     assert "app/current" in readme
     assert "private `.venv`" in readme
-    assert "synctify-1.1.0.tar.gz" in readme
+    assert "synctify-1.0.6.tar.gz" in readme
     assert "matching Python wheel is bundled inside the macOS ZIP" in readme
     assert "The GitHub Release also includes `SHA256SUMS`" not in readme
 
@@ -62,22 +62,19 @@ def test_readme_documents_self_update_policy() -> None:
     assert "gh auth login" in readme
 
 
+def test_readme_documents_update_progress() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "report their current stage to stderr" in readme
+    assert "final structured workflow report remains on stdout" in readme
+
+
 def test_readme_documents_configurable_library() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "synctify config set library-dir" in readme
     assert "SYNCTIFY_LIBRARY_DIR" in readme
     assert "--library /absolute/path/to/Music" in readme
-
-
-def test_readme_documents_tui_command_center() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "Import Spotify" in readme
-    assert "Full Update" in readme
-    assert "Commands tab" in readme
-    assert "acquire --source tidal" in readme
-    assert "keyboard tab navigation (`1`–`5`)" in readme
 
 
 def test_installed_entry_point_uses_explicit_cli_app() -> None:

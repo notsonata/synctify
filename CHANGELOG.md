@@ -1,26 +1,16 @@
 # Changelog
 
-## 1.1.0 - 2026-08-23
+## 1.0.6 - 2026-08-23
 
-Synctify 1.1.0 turns the Textual interface from a read-mostly status frontend into an operational control surface for the existing CLI workflows.
+Synctify 1.0.6 makes coordinated updates visibly report what they are doing instead of appearing frozen during long Spotify and Streamrip operations.
 
-### TUI command center
+### Update progress
 
-- add first-class `Import Spotify` and `Full Update` actions to the dashboard
-- add `i` and `u` keyboard shortcuts for Spotify import and the coordinated update workflow
-- add a fifth `Commands` tab with quick actions for import, full update, automatic resolution, playlist builds, and target listing
-- add a command entry box for running existing non-interactive Synctify CLI commands such as acquisition, sync, backup, and configuration commands without leaving the TUI
-- execute commands in a background Textual worker and stream merged stdout/stderr into an in-app command log
-- run commands through the installed `synctify.app` command surface rather than duplicating workflow logic in the TUI
-- suppress nested automatic update checks for commands launched by the TUI and reject recursive `tui` launches
-- refresh dashboard and unresolved-track state after a command completes
-
-### Regression coverage
-
-- cover command execution, output streaming, `SYNCTIFY_HOME` propagation, automatic-update suppression, and nested-TUI rejection
-- extend headless Textual coverage to the new Commands tab and command input
-
-Commands that require terminal input remain CLI-only for now; the command runner uses a closed stdin so interactive prompts cannot block the TUI worker.
+- print an immediate status line while fetching Spotify desired state
+- report the number of unresolved tracks being searched for each automatic-resolution source
+- report download planning, acquisition groups, playlist readiness checks, and playlist rebuilding
+- send progress messages to stderr while keeping the final structured update report on stdout
+- preserve dry-run rollback behavior so interrupted previews do not persist Spotify or resolution state
 
 No SQLite schema migration is required for this release.
 
