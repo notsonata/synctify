@@ -26,7 +26,7 @@ Quick start
 Spotify workflow
 ----------------
 
-Spotify discovery and music-library updates are deliberately separate.
+Spotify discovery/review and provider downloads are deliberately separate.
 
 Fetch the playlist list, including Liked Songs, without fetching every song:
 
@@ -35,6 +35,10 @@ Fetch the playlist list, including Liked Songs, without fetching every song:
 In the TUI open the Spotify tab. Select one playlist at a time, choose
 Load / Review, include or exclude individual tracks, and then Confirm Playlist.
 Liked Songs behaves like a normal playlist. Exclusions persist.
+
+Fetching, loading, reviewing, and confirming Spotify playlists do not contact
+Qobuz, Tidal, or Deezer and do not start downloads. Confirmation only records
+the user's approved desired state.
 
 Later, check only playlists already imported into Synctify:
 
@@ -60,7 +64,13 @@ Library update
 
 `synctify update` works only on playlists/tracks already confirmed in Synctify.
 It does not fetch Spotify playlists or automatically accept new Spotify tracks.
-It resolves confirmed tracks, acquires missing FLACs, and rebuilds playlists.
+
+Before any provider lookup, Synctify reuses valid local_path records for approved
+Spotify tracks and scans the canonical FLAC library once for unique safe
+ISRC/metadata matches. Tracks already available locally skip Qobuz/Tidal/Deezer
+resolution and skip downloading. Only still-missing approved tracks proceed to
+provider resolution and acquisition.
+
 Long operations report their stage to stderr while the final structured report
 remains on stdout. Resolution emits current/total progress and the current track.
 
@@ -93,7 +103,7 @@ Updating the Synctify application is separate from `synctify update`:
 Installed Synctify checks for a newer stable application release according to
 the configured auto-update policy. The default interactive prompt looks like:
 
-   Synctify application 1.2.2 is available (current: 1.2.1). Upgrade now? [Y/n]
+   Synctify application 1.2.3 is available (current: 1.2.2). Upgrade now? [Y/n]
 
 Upgrade policy:
 
@@ -169,6 +179,10 @@ NOT stored in this release folder. They remain in Synctify's normal application
 data locations (or SYNCTIFY_HOME if overridden). Replacing an application
 release therefore does not delete user data.
 
-Synctify 1.2 uses database schema v6 for the staged Spotify playlist catalog,
-persistent exclusions, and pending playlist changes. Existing imported Spotify
-playlists are migrated into the new tracked catalog when the schema is upgraded.
+Synctify 1.2.2 uses database schema v7. When upgrading a schema v6 database,
+previously tracked Spotify playlists are moved back to review state so they
+cannot trigger provider resolution before explicit approval. Previously included
+items become pending additions and exclusions remain excluded. Track rows,
+recorded local FLAC paths/hashes, provider mappings, local audio files, and cloud
+backups are preserved. After approval, those local FLACs are reused before any
+provider download is considered.
