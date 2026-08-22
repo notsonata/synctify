@@ -18,7 +18,6 @@ from .cli import (
     resolve_status,
     spotify_login,
     spotify_logout,
-    spotify_pull,
     targets_add,
     targets_add_backup,
     targets_list,
@@ -40,8 +39,8 @@ from .entrypoint import (
     configured_status,
     configured_streamrip_doctor,
     configured_sync,
-    configured_update,
 )
+from .library_update_cli import configured_update
 from .migration_cli import migrate_command
 from .portable_cli import export_command, import_command
 from .relink_cli import relink_command
@@ -55,6 +54,7 @@ from .self_update import (
 )
 from .self_update_cli import self_update_command
 from .setup_cli import setup_command
+from .spotify_selection_cli import fetch_playlists_command, update_tracked_command
 from .user_config import UserConfigError, load_user_config, resolve_auto_update
 
 
@@ -64,7 +64,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-spotify_app = typer.Typer(help="Authenticate with Spotify and import desired library state.")
+spotify_app = typer.Typer(help="Authenticate with Spotify and manage staged playlist selection.")
 resolve_app = typer.Typer(help="Inspect and manage source-service track resolutions.")
 qobuz_app = typer.Typer(help="Inspect and run the external qobuz-dl downloader.")
 streamrip_app = typer.Typer(help="Inspect the external Streamrip downloader.")
@@ -218,10 +218,12 @@ app.command("relink")(relink_command)
 app.command("migrate")(migrate_command)
 app.command("upgrade")(self_update_command)
 
-# Spotify commands.
+# Spotify commands. Catalog fetching and tracked updates are deliberately separate
+# from the active desired-library state so fetching can never silently start downloads.
 spotify_app.command("login")(spotify_login)
 spotify_app.command("logout")(spotify_logout)
-spotify_app.command("pull")(spotify_pull)
+spotify_app.command("fetch-playlists")(fetch_playlists_command)
+spotify_app.command("update-tracked")(update_tracked_command)
 
 # Resolution commands. Use the configured automatic resolver; status/clear are the
 # single core implementations and set has a validation-aware wrapper above.

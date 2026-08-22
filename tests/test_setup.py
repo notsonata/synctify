@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from synctify.config import Settings
+from synctify.db import SCHEMA_VERSION
 from synctify.setup import SetupError, SetupOptions, run_setup
 from synctify.setup_cli import app
 from synctify.spotify.auth import SpotifyOAuthConfig
@@ -64,7 +65,7 @@ def test_run_setup_initializes_state_and_persists_defaults(tmp_path: Path) -> No
         version = connection.execute(
             "SELECT value FROM metadata WHERE key = 'schema_version'"
         ).fetchone()[0]
-    assert version == "5"
+    assert version == SCHEMA_VERSION
 
 
 def test_run_setup_uses_custom_library_without_creating_default(tmp_path: Path) -> None:

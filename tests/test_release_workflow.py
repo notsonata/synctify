@@ -21,25 +21,25 @@ def _release_module():
 def test_current_stable_release_metadata_is_self_consistent() -> None:
     release = _release_module()
 
-    version, notes = release.verify_release(ROOT, "v1.1.1")
+    version, notes = release.verify_release(ROOT, "v1.2.0")
 
-    assert version == "1.1.1"
-    assert "Upgrade command" in notes
-    assert "synctify upgrade" in notes
+    assert version == "1.2.0"
+    assert "Staged Spotify playlist selection" in notes
+    assert "synctify spotify fetch-playlists" in notes
 
 
 def test_mismatched_release_tag_is_rejected() -> None:
     release = _release_module()
 
     with pytest.raises(release.ReleaseValidationError, match="does not match pyproject"):
-        release.verify_release(ROOT, "v1.1.2")
+        release.verify_release(ROOT, "v1.2.1")
 
 
 def test_non_stable_release_tag_is_rejected() -> None:
     release = _release_module()
 
     with pytest.raises(release.ReleaseValidationError, match="stable vX.Y.Z"):
-        release.verify_release(ROOT, "1.1.1")
+        release.verify_release(ROOT, "1.2.0")
 
 
 def test_release_workflow_builds_and_publishes_verified_artifacts() -> None:

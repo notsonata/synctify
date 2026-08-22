@@ -137,7 +137,7 @@ def test_installed_wrapper_marks_invocation_for_update_checks() -> None:
     assert 'export SYNCTIFY_BIN_DIR="$BIN_DIR"' in installer
 
 
-def test_bundle_readme_explains_state_and_external_tool_boundaries() -> None:
+def test_bundle_readme_explains_staged_state_and_external_tool_boundaries() -> None:
     text = (ROOT / "distribution" / "macos" / "README.txt").read_text(
         encoding="utf-8"
     )
@@ -150,4 +150,8 @@ def test_bundle_readme_explains_state_and_external_tool_boundaries() -> None:
     assert "Upgrade now?" in text
     assert "Python 3.12 or newer" in text
     assert "not bundled with Synctify" in text
-    assert "database, configuration, canonical music library, and playlists are NOT stored" in text
+    assert "synctify spotify fetch-playlists" in text
+    assert "synctify spotify update-tracked" in text
+    assert "Cloud backups are never deleted by unimport" in text
+    assert "database, configuration, canonical music library, and playlists are" in text
+    assert "NOT stored in this release folder" in text

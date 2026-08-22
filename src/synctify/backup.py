@@ -209,16 +209,14 @@ def _current_playlists_command(
     executable: str,
     dry_run: bool,
 ) -> list[str]:
-    command = [
-        executable,
-        "sync",
-        str(playlists_dir),
+    # Backups are append/copy-only. Never use rclone sync here: an unimported
+    # playlist must not cause an existing remote backup object to be deleted.
+    return _copy_command(
+        playlists_dir,
         _remote_join(destination, "playlists", "current"),
-        "--create-empty-src-dirs",
-    ]
-    if dry_run:
-        command.append("--dry-run")
-    return command
+        executable=executable,
+        dry_run=dry_run,
+    )
 
 
 def backup_commands(

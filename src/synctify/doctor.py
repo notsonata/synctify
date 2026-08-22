@@ -174,6 +174,8 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
             "track_resolutions",
             "playlist_backup_snapshots",
             "generated_playlists",
+            "spotify_playlist_catalog",
+            "spotify_playlist_items",
         }
         missing_base = sorted(base_required - tables)
         missing_migrations = sorted(migration_tables - tables)
@@ -209,7 +211,11 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
                     )
                 )
         else:
-            message = "schema v5 tables present" if schema_is_current else "core tables present"
+            message = (
+                f"schema v{SCHEMA_VERSION} tables present"
+                if schema_is_current
+                else "core tables present"
+            )
             checks.append(DoctorCheck("database", "tables", CheckStatus.PASS, message))
 
         if "sync_targets" in tables:

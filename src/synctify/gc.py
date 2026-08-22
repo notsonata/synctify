@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
+from typing import Iterable
 
 
 @dataclass(slots=True, frozen=True)
@@ -159,10 +160,27 @@ def _track_candidate(row: sqlite3.Row, library_dir: Path) -> CollectibleTrack:
 def collectible_tracks(
     connection: sqlite3.Connection,
     library_dir: Path,
+    *,
+    spotify_ids: Iterable[str] | None = None,
 ) -> tuple[CollectibleTrack, ...]:
-    """Return local tracks with zero references from the current desired playlist state."""
+    """Return local tracks with zero references from the current desired playlist state.
+
+    When spotify_ids is supplied, only those track records are considered. This is
+    used by playlist unimport so it cannot opportunistically delete unrelated
+    unreferenced files elsewhere in the library.
+    """
+    selected = tuple(dict.fromkeys(spotify_ids or ()))
+    selected_clause = ""
+    params: tuple[str, ...] = ()
+    if spotify_ids is not None:
+        if not selected:
+            return ()
+        placeholders = ",".join("?" for _ in selected)
+        selected_clause = f"AND t.spotify_id IN ({placeholders})"
+        params = selected
+
     rows = connection.execute(
-        """
+        f"""
         SELECT
             t.spotify_id,
             t.title,
@@ -176,13 +194,15 @@ def collectible_tracks(
         FROM tracks AS t
         WHERE t.local_path IS NOT NULL
           AND t.local_path != ''
+          {selected_clause}
           AND NOT EXISTS (
               SELECT 1
               FROM playlist_tracks AS pt
               WHERE pt.track_id = t.spotify_id
           )
         ORDER BY t.artist COLLATE NOCASE, t.title COLLATE NOCASE
-        """
+        """,
+        params,
     ).fetchall()
     return tuple(_track_candidate(row, library_dir) for row in rows)
 
@@ -220,8 +240,13 @@ def clean_unreferenced_tracks(
     library_dir: Path,
     *,
     apply: bool = False,
+    spotify_ids: Iterable[str] | None = None,
 ) -> CleanupReport:
-    candidates = collectible_tracks(connection, library_dir)
+    candidates = collectible_tracks(
+        connection,
+        library_dir,
+        spotify_ids=spotify_ids,
+    )
     if not apply:
         skipped = tuple(item for item in candidates if not item.safe_to_delete)
         return CleanupReport(candidates, (), (), skipped, (), True)

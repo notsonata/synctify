@@ -19,70 +19,91 @@ Quick start
 
    synctify setup
 
-   Setup prompts for the canonical music library directory. Press Enter to use
-   the normal Synctify application-data library, or enter an absolute path to
-   an existing/local FLAC library.
-
 5. Launch the interactive TUI:
 
    synctify
 
-The TUI includes Import Spotify and Full Update actions plus a Commands tab for
-non-interactive Synctify commands. Import Spotify runs the existing
-`synctify spotify pull` desired-state import. Full Update runs the coordinated
-Spotify, resolution, acquisition, and playlist workflow. Long-running commands
-stream their stdout/stderr into the TUI.
+Spotify workflow
+----------------
 
-The stable command can run every normal CLI command, for example:
+Spotify discovery and music-library updates are deliberately separate.
 
-   synctify doctor
+Fetch the playlist list, including Liked Songs, without fetching every song:
+
+   synctify spotify fetch-playlists
+
+In the TUI open the Spotify tab. Select one playlist at a time, choose
+Load / Review, include or exclude individual tracks, and then Confirm Playlist.
+Liked Songs behaves like a normal playlist. Exclusions persist.
+
+Later, check only playlists already imported into Synctify:
+
+   synctify spotify update-tracked
+
+New tracks are shown as pending additions. Tracks removed on Spotify are shown
+as pending removals. Neither kind of change enters the active library until the
+user reviews it and chooses Apply Choices.
+
+Unimporting a playlist removes its local generated playlist. Local FLACs are
+removed only after their last imported-playlist reference is gone. If the same
+track is still used by another imported playlist, its FLAC remains.
+
+Cloud backups are never deleted by unimport. rclone backup operations use
+copy-only semantics for the music library and playlist backup paths, so existing
+remote files and historical snapshots remain intact.
+
+Library update
+--------------
+
    synctify update --dry-run
    synctify update
 
-`synctify update` updates the Spotify/library state. It does not mean application
-upgrade.
+`synctify update` works only on playlists/tracks already confirmed in Synctify.
+It does not fetch Spotify playlists or automatically accept new Spotify tracks.
+It resolves confirmed tracks, acquires missing FLACs, and rebuilds playlists.
+Long operations report their stage to stderr while the final structured report
+remains on stdout.
 
-Long update operations print their current stage while Spotify state is fetched,
-tracks are resolved through each source, downloads are planned or run, and
-playlist readiness/building is checked. Progress goes to stderr while the final
-structured update report remains on stdout.
+TUI activity and cancellation
+-----------------------------
 
-Installed Synctify checks for a newer stable application release every time
-`synctify` is run. When a newer release is available in an interactive Terminal,
-the default behavior is:
+Long-running TUI actions show a loading indicator and status message. Conflicting
+buttons are disabled while an action is running. Press Esc or choose Cancel (Esc)
+to cancel an active cancellable operation. The Spotify tab shows included,
+excluded, pending-addition, and pending-removal counts for each playlist.
 
-   Synctify application 1.1.2 is available (current: 1.1.1). Upgrade now? [Y/n]
+Application upgrades
+--------------------
 
-Answering yes downloads the matching macOS release bundle, validates it,
-installs it into a new versioned app directory, switches app/current, and
-restarts the command under the new version. Non-interactive scripts are never
-blocked for input; they receive an application-upgrade notice and continue.
-
-Check or upgrade the application explicitly at any time:
+Updating the Synctify application is separate from `synctify update`:
 
    synctify upgrade --check
    synctify upgrade
 
-Upgrade policy can be changed with:
+Installed Synctify checks for a newer stable application release according to
+the configured auto-update policy. The default interactive prompt looks like:
+
+   Synctify application 1.2.1 is available (current: 1.2.0). Upgrade now? [Y/n]
+
+Upgrade policy:
 
    synctify config set auto-update prompt
    synctify config set auto-update check
    synctify config set auto-update install
    synctify config set auto-update off
 
-`prompt` is the default. `check` only prints a notice, `install` upgrades without
-asking, and `off` disables automatic checks. SYNCTIFY_AUTO_UPDATE can override
-the saved value.
+SYNCTIFY_AUTO_UPDATE can override the saved value. For private releases,
+authenticate GitHub CLI with `gh auth login` or set SYNCTIFY_GITHUB_TOKEN.
+GH_TOKEN and GITHUB_TOKEN are also recognized.
 
-This repository may require GitHub authentication to read release assets. If it
-is private, authenticate GitHub CLI with `gh auth login` or set
-SYNCTIFY_GITHUB_TOKEN (GH_TOKEN and GITHUB_TOKEN are also recognized).
+Other commands
+--------------
 
-The extracted bundle can still be used portably without installation. Portable
-runs do not perform automatic upgrade checks:
-
-   ./synctify.sh
-   ./synctify.sh doctor
+   synctify doctor
+   synctify resolve status
+   synctify acquire --dry-run
+   synctify playlists build
+   synctify backup cloud --dry-run
 
 To change the canonical library later:
 
@@ -92,7 +113,14 @@ Remove that override to return to the built-in location:
 
    synctify config unset library-dir
 
-If macOS or your unzip tool removed the executable bit, run this once:
+The extracted bundle can also be used portably without installation:
+
+   ./synctify.sh
+   ./synctify.sh doctor
+
+Portable runs do not perform automatic application-upgrade checks.
+
+If macOS or your unzip tool removed the executable bit:
 
    chmod +x synctify.sh install.sh
 
@@ -101,8 +129,8 @@ Requirements
 
 - macOS
 - Python 3.12 or newer
-- Internet access on first application launch so pip can install the bundled wheel's Python dependencies
-- A Spotify developer application for Spotify import/login features
+- Internet access on first application launch so pip can install dependencies
+- Spotify developer application for playlist discovery/login
 - Streamrip for automatic catalog resolution and Tidal/Deezer acquisition
 - qobuz-dl for the default Qobuz acquisition path
 - rclone for mirror/backup operations
@@ -120,18 +148,17 @@ It switches this stable pointer to the installed release:
 
    ~/Library/Application Support/Synctify/app/current
 
-The ~/.local/bin/synctify wrapper always launches app/current/synctify.sh and
-marks the process as an installed invocation. This keeps the command path stable
-across releases and lets the upgrader install a complete version before switching
-`current`.
-
-Each installed release creates and reuses its own private .venv when first run.
-Set SYNCTIFY_PYTHON to an explicit Python interpreter if you do not want the
-launcher to auto-detect one.
+The ~/.local/bin/synctify wrapper always launches app/current/synctify.sh. Each
+installed release creates and reuses its own private .venv.
 
 Your data
 ---------
 
-Synctify's database, configuration, canonical music library, and playlists are NOT stored in this release folder. The database, configuration, and generated playlists continue to live in Synctify's normal macOS application-data directory (or SYNCTIFY_HOME if you set it). The canonical music library uses that location by default, but can be pointed at another absolute directory during setup, with `config set library-dir`, or via SYNCTIFY_LIBRARY_DIR.
+Synctify's database, configuration, canonical music library, and playlists are
+NOT stored in this release folder. They remain in Synctify's normal application
+data locations (or SYNCTIFY_HOME if overridden). Replacing an application
+release therefore does not delete user data.
 
-The installed application payload lives under the `app` subdirectory and is separate from those user-data paths. Replacing or removing an application release therefore does not delete the Synctify database, configuration, playlists, or an external canonical music library.
+Synctify 1.2 uses database schema v6 for the staged Spotify playlist catalog,
+persistent exclusions, and pending playlist changes. Existing imported Spotify
+playlists are migrated into the new tracked catalog when the schema is upgraded.
