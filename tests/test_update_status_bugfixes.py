@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 import synctify.entrypoint as entrypoint
 from synctify.db import connect, initialize
 from synctify.entrypoint import app
+from synctify.library_update_cli import _primary_failures
 from synctify.playlists import PlaylistBuildReport, PlaylistBuildResult
 from synctify.spotify.ingest import SpotifySnapshot
 from synctify.spotify.state import ChangePlan
@@ -112,7 +113,7 @@ def test_status_tolerates_legacy_database_without_resolution_table(
     assert version == "2"
 
 
-def test_strict_incomplete_playlist_is_an_operational_failure() -> None:
+def test_incomplete_playlist_is_warning_not_primary_operational_failure() -> None:
     incomplete = PlaylistBuildReport(
         (
             PlaylistBuildResult(
@@ -146,7 +147,12 @@ def test_strict_incomplete_playlist_is_an_operational_failure() -> None:
         allow_partial=True,
     )
 
+    # The workflow still records strict incompleteness for callers that care,
+    # but the installed update command no longer turns that review state into
+    # status 2 unless an actual provider/search/download error occurred.
     assert strict.strict_playlist_failures == 1
     assert strict.operational_failures == 1
+    assert _primary_failures(strict) == 0
     assert partial.strict_playlist_failures == 0
     assert partial.operational_failures == 0
+    assert _primary_failures(partial) == 0
