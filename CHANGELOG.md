@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.5 - 2026-08-22
+
+Synctify 1.0.5 adds release-aware self-updating on top of the stable macOS installation layout introduced in 1.0.4.
+
+### Self-update
+
+- add `synctify self-update --check` to inspect the latest stable GitHub Release without installing it
+- add `synctify self-update` to download, validate, extract, and install a newer macOS release bundle
+- use authenticated GitHub API access when `SYNCTIFY_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, or an authenticated `gh` CLI session is available
+- validate the stable release tag, expected `synctify-<version>-macos.zip` asset, archive paths, bundle VERSION, and optional GitHub SHA-256 asset digest before installation
+- reuse the 1.0.4 versioned `app/releases/<version>` layout and switch `app/current` only through the existing installer
+- restart the original command through the stable `synctify` wrapper after an automatic update
+
+### Update prompt policy
+
+- check GitHub for a newer stable release on every invocation of the installed `synctify` command
+- default `auto-update` to `prompt`: interactive terminals ask `Update now? [Y/n]` before installing
+- never block non-interactive scripts for input; they print an update notice and continue
+- support `auto-update` values `prompt`, `check`, `install`, and `off`, with the `SYNCTIFY_AUTO_UPDATE` environment override
+- keep portable release bundles and development checkouts free of automatic update checks
+- keep update-check failures non-fatal so offline GitHub access cannot prevent normal Synctify commands from running
+
+No SQLite schema migration is required for this release.
+
 ## 1.0.4 - 2026-08-22
 
 Synctify 1.0.4 adds a stable macOS installation layout so users can run `synctify` from anywhere instead of keeping Terminal inside an extracted release folder.
