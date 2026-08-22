@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.19.0**
+**Current version: 0.20.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -32,6 +32,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 - Python 3.12+ CLI
 - first-run interactive and scripted setup through `synctify setup`
 - portable setup metadata export/import for migration between Macs
+- migration relink/copy of an existing FLAC library without redownloading matched tracks
 - SQLite state database with migrations
 - top-level read-only setup diagnostics through `synctify doctor`
 - persistent defaults for source priority, downloader quality, and executable paths
@@ -164,6 +165,44 @@ After migration, authenticate Spotify on the new Mac and verify the setup:
 synctify spotify login
 synctify doctor
 ```
+
+## Library migration and relink
+
+After importing setup metadata on another Mac, authenticate Spotify and recreate desired playlist/library state before relinking audio:
+
+```bash
+synctify spotify login
+synctify spotify pull
+```
+
+Preview an existing copied FLAC tree:
+
+```bash
+synctify relink /Volumes/MusicBackup/MyLibrary
+```
+
+Relink scans tagged FLAC files and uses the same exact-ISRC and deterministic metadata matcher used by acquisition and audit. It only targets tracks that are currently referenced by desired Spotify state and that do not already have a usable file inside the canonical Synctify library.
+
+Apply safe matches explicitly:
+
+```bash
+synctify relink /Volumes/MusicBackup/MyLibrary --apply
+```
+
+Migration behavior:
+
+- if the matched FLAC is already inside the canonical library, Synctify adopts it in place and only repairs SQLite local path/hash state
+- if the matched FLAC is outside the canonical library, Synctify copies it into the canonical library while preserving the source-relative folder structure
+- source FLACs are never moved or deleted
+- copied files are SHA-256 verified before SQLite is updated
+- an existing identical destination is reused
+- a conflicting destination is never overwritten; Synctify uses a deterministic `[synctify-<id>]` filename when safe, otherwise reports a failure
+- duplicate/ambiguous matches remain unresolved
+- one source FLAC is not automatically assigned to multiple desired tracks
+- already-local desired tracks are skipped
+- `--limit N` can restrict the number of missing desired tracks inspected in one run
+
+This command does not download audio or change source-service resolutions. After relinking, `synctify audit` and `synctify playlists build` can be used to verify the reconstructed local library.
 
 ## Persistent configuration
 
