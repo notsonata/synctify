@@ -14,7 +14,7 @@ def test_release_version_is_consistent() -> None:
     version = pyproject["project"]["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert version == "1.2.2"
+    assert version == "1.2.3"
     assert synctify.__version__ == version
     assert f"**Current version: {version}**" in readme
 
@@ -42,13 +42,13 @@ def test_readme_describes_current_automatic_resolution_contract() -> None:
 def test_readme_documents_release_zip_launcher() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "synctify-1.2.2-macos.zip" in readme
+    assert "synctify-1.2.3-macos.zip" in readme
     assert "./synctify.sh" in readme
     assert "./synctify.sh install" in readme
     assert "~/.local/bin/synctify" in readme
     assert "app/current" in readme
     assert "private `.venv`" in readme
-    assert "synctify-1.2.2.tar.gz" in readme
+    assert "synctify-1.2.3.tar.gz" in readme
     assert "matching Python wheel bundled inside the macOS ZIP" in readme
     assert "The GitHub Release also includes `SHA256SUMS`" not in readme
 
@@ -94,6 +94,14 @@ def test_readme_documents_tui_playlist_browser_and_cancellation() -> None:
     assert "acquire --source tidal" in readme
 
 
+def test_readme_documents_active_dashboard_scope() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "active imported desired state only" in readme
+    assert "Historical track rows" in readme
+    assert "owning imported playlist name" in readme
+
+
 def test_readme_documents_safe_unimport_and_non_destructive_backups() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -102,19 +110,20 @@ def test_readme_documents_safe_unimport_and_non_destructive_backups() -> None:
     assert "copy-only semantics" in readme
 
 
-def test_readme_documents_local_flac_reuse_before_resolution() -> None:
+def test_readme_documents_identity_safe_local_flac_reuse() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "scans the canonical library once" in readme
-    assert "valid canonical `local_path` never enters automatic provider resolution" in readme
-    assert "files you already have are reused rather than downloaded again" in readme
+    assert "verifies the FLAC metadata against the Spotify identity" in readme
+    assert "unique exact ISRC" in readme
+    assert "Metadata-only candidates remain unresolved" in readme
 
 
-def test_readme_documents_update_progress() -> None:
+def test_readme_documents_update_progress_and_incomplete_status() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "report their current stage to stderr" in readme
-    assert "Resolving via SOURCE [CURRENT/TOTAL] Artist - Track" in readme
+    assert "Resolving via SOURCE [CURRENT/TOTAL] PLAYLIST · Artist - Track" in readme
+    assert "incomplete-playlist warning instead of returning status 2" in readme
     assert "final structured workflow report remains on stdout" in readme
 
 
@@ -132,6 +141,7 @@ def test_readme_documents_schema_v7_review_migration() -> None:
     assert "schema v7" in readme
     assert "Previously included items become pending additions" in readme
     assert "does not delete track rows, local FLAC files" in readme
+    assert "requires no new database migration" in readme
 
 
 def test_installed_entry_point_uses_explicit_cli_app() -> None:

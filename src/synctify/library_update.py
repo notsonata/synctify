@@ -25,6 +25,47 @@ def _unchanged_spotify_plan() -> ChangePlan:
     return ChangePlan((), (), (), (), 0, 0, 0, ())
 
 
+def _playlist_names(connection: sqlite3.Connection) -> tuple[str, ...]:
+    return tuple(
+        str(row["name"])
+        for row in connection.execute(
+            "SELECT name FROM playlists ORDER BY name COLLATE NOCASE, spotify_id"
+        ).fetchall()
+    )
+
+
+def _playlist_scoped_progress(
+    connection: sqlite3.Connection,
+    progress: ProgressReporter | None,
+) -> ProgressReporter | None:
+    """Annotate per-track resolver progress with active owning playlist names."""
+    if progress is None:
+        return None
+
+    owners_by_label: dict[str, set[str]] = {}
+    for row in connection.execute(
+        """
+        SELECT t.artist, t.title, p.name
+        FROM playlist_tracks AS pt
+        JOIN tracks AS t ON t.spotify_id = pt.track_id
+        JOIN playlists AS p ON p.spotify_id = pt.playlist_id
+        ORDER BY p.name COLLATE NOCASE, p.spotify_id
+        """
+    ).fetchall():
+        label = f"{row['artist']} - {row['title']}"
+        owners_by_label.setdefault(label, set()).add(str(row["name"]))
+
+    def report(message: str) -> None:
+        if message.startswith("Resolving via ") and "] " in message:
+            prefix, label = message.split("] ", 1)
+            owners = owners_by_label.get(label)
+            if owners:
+                message = f"{prefix}] {', '.join(sorted(owners, key=str.casefold))} · {label}"
+        progress(message)
+
+    return report
+
+
 def _reconcile_local_library(
     connection: sqlite3.Connection,
     library_dir: Path,
@@ -38,9 +79,9 @@ def _reconcile_local_library(
     _notify(
         progress,
         "Local FLAC match: "
-        f"{report.reused} recorded path(s) reused, "
-        f"{report.matched} existing FLAC(s) matched, "
-        f"{report.stale_cleared} stale path(s) cleared.",
+        f"{report.reused} verified recorded path(s) reused, "
+        f"{report.matched} unique exact-ISRC FLAC(s) matched, "
+        f"{report.stale_cleared} stale/mismatched path(s) cleared.",
     )
 
 
@@ -56,10 +97,16 @@ def preview_library_update_workflow(
     progress: ProgressReporter | None = _stderr_progress,
 ) -> UpdateWorkflowReport:
     """Preview resolution/acquisition for the already-confirmed desired library."""
-    _notify(progress, "Planning current Synctify library in dry-run sandbox...")
+    scoped_progress = _playlist_scoped_progress(connection, progress)
+    names = _playlist_names(connection)
+    _notify(scoped_progress, "Planning current Synctify library in dry-run sandbox...")
+    _notify(
+        scoped_progress,
+        "Active playlist scope: " + (", ".join(names) if names else "none"),
+    )
     connection.execute("SAVEPOINT synctify_library_update_preview")
     try:
-        _reconcile_local_library(connection, library_dir, progress)
+        _reconcile_local_library(connection, library_dir, scoped_progress)
         resolution_sources, resolutions = _run_resolution_priority(
             connection,
             search_provider,
@@ -67,20 +114,20 @@ def preview_library_update_workflow(
             search_results=search_results,
             resolution_limit=resolution_limit,
             preview=True,
-            progress=progress,
+            progress=scoped_progress,
         )
-        _notify(progress, "Planning downloads...")
+        _notify(scoped_progress, "Planning downloads...")
         acquisitions = _group_pending_acquisitions(
             connection,
             acquisition_provider_factory,
         )
-        _notify(progress, "Checking playlist readiness...")
+        _notify(scoped_progress, "Checking playlist readiness...")
         readiness = playlist_readiness(connection)
     finally:
         connection.execute("ROLLBACK TO SAVEPOINT synctify_library_update_preview")
         connection.execute("RELEASE SAVEPOINT synctify_library_update_preview")
 
-    _notify(progress, "Dry-run preview complete.")
+    _notify(scoped_progress, "Dry-run preview complete.")
     return UpdateWorkflowReport(
         spotify=_unchanged_spotify_plan(),
         resolution_sources=resolution_sources,
@@ -106,8 +153,14 @@ def run_library_update_workflow(
     progress: ProgressReporter | None = _stderr_progress,
 ) -> UpdateWorkflowReport:
     """Resolve/acquire/rebuild only the playlists already confirmed in Synctify."""
-    _notify(progress, "Using confirmed Synctify desired state. Spotify is not fetched by this command.")
-    _reconcile_local_library(connection, library_dir, progress)
+    scoped_progress = _playlist_scoped_progress(connection, progress)
+    names = _playlist_names(connection)
+    _notify(scoped_progress, "Using confirmed Synctify desired state. Spotify is not fetched by this command.")
+    _notify(
+        scoped_progress,
+        "Active playlist scope: " + (", ".join(names) if names else "none"),
+    )
+    _reconcile_local_library(connection, library_dir, scoped_progress)
     connection.commit()
 
     resolution_sources, resolutions = _run_resolution_priority(
@@ -117,11 +170,11 @@ def run_library_update_workflow(
         search_results=search_results,
         resolution_limit=resolution_limit,
         preview=False,
-        progress=progress,
+        progress=scoped_progress,
     )
     connection.commit()
 
-    _notify(progress, "Planning downloads...")
+    _notify(scoped_progress, "Planning downloads...")
     planned_acquisitions = _group_pending_acquisitions(
         connection,
         acquisition_provider_factory,
@@ -131,16 +184,16 @@ def run_library_update_workflow(
         planned_acquisitions,
         acquisition_provider_factory,
         library_dir,
-        progress=progress,
+        progress=scoped_progress,
     )
 
-    _notify(progress, "Building playlists...")
+    _notify(scoped_progress, "Building playlists...")
     playlists = build_playlists(
         connection,
         playlists_dir,
         allow_partial=allow_partial,
     )
-    _notify(progress, "Library update workflow complete.")
+    _notify(scoped_progress, "Library update workflow complete.")
     return UpdateWorkflowReport(
         spotify=_unchanged_spotify_plan(),
         resolution_sources=resolution_sources,

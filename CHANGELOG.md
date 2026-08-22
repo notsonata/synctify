@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.3 - 2026-08-23
+
+Synctify 1.2.3 fixes active-library scoping and makes automatic local-FLAC reuse identity-safe.
+
+### Active library scope
+
+- make Dashboard track, local-FLAC, unresolved, and stored-resolution counts describe only tracks referenced by currently imported playlists
+- keep historical track rows available for review/migration without presenting them as active desired state
+- print the active imported playlist scope before Library Update work begins
+- include the owning playlist name in every per-track resolver progress message
+
+### Local FLAC identity safety
+
+- verify recorded local paths against FLAC metadata before reusing them for a Spotify track
+- clear stale or mismatched recorded paths so incorrectly attached files from 1.2.2 can be repaired safely
+- remove fuzzy metadata-only adoption from automatic Library Update
+- auto-adopt an unrecorded canonical FLAC only when there is one unique exact ISRC match
+- prevent one unrecorded local FLAC from being automatically assigned to multiple Spotify track IDs in the same reconciliation pass
+- preserve all local files when a recorded association is rejected; only the database association is cleared
+
+### Update result semantics
+
+- treat unresolved-but-otherwise-valid approved tracks as an incomplete playlist warning rather than a status-2 operational failure
+- reserve status 2 for actual search, provider, or download errors
+
+No SQLite schema migration is required for this release; schema v7 remains current.
+
 ## 1.2.2 - 2026-08-23
 
 Synctify 1.2.2 restores the intended review-before-download flow for legacy libraries and reuses existing canonical FLACs before any provider lookup.

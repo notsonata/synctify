@@ -17,7 +17,12 @@ from .user_config import (
     resolve_source_priority,
     resolve_streamrip,
 )
-from .workflow import format_update_workflow_report
+from .workflow import UpdateWorkflowReport, format_update_workflow_report
+
+
+def _primary_failures(report: UpdateWorkflowReport) -> int:
+    """Count actual provider/search/download errors, not unresolved review state."""
+    return report.resolution_failures + sum(group.failed for group in report.acquisitions)
 
 
 def configured_update(
@@ -93,8 +98,13 @@ def configured_update(
     typer.echo(format_update_workflow_report(report))
     if not dry_run and report.playlists is not None and report.playlists.incomplete:
         typer.echo(
-            "Some playlists remain incomplete. Resolve/acquire the missing tracks or use --allow-partial.",
+            "Library update completed with incomplete playlists. "
+            "Some approved tracks remain unresolved or unavailable; review the Unresolved tab "
+            "or use --allow-partial to build partial playlists.",
             err=True,
         )
-    if report.operational_failures:
+
+    # Unresolved tracks are an expected review state, not an operational crash.
+    # Reserve exit status 2 for actual search/download/provider errors.
+    if _primary_failures(report):
         raise typer.Exit(code=2)
