@@ -8,6 +8,25 @@ from .audit import LibraryAuditReport, audit_library
 from .config import Settings
 from .db import connect, initialize
 from .doctor import DoctorReport, run_doctor
+from .migration_checkpoint import (
+    STAGE_AUDIT,
+    STAGE_DOCTOR,
+    STAGE_LIBRARY_RELINK,
+    STAGE_PLAYLISTS,
+    STAGE_PORTABLE_IMPORT,
+    STAGE_SPOTIFY_LOGIN,
+    STAGE_SPOTIFY_REFRESH,
+    MigrationCheckpoint,
+    MigrationCheckpointError,
+    checkpoint_path,
+    load_checkpoint,
+    mark_stage_completed,
+    migration_identity,
+    new_checkpoint,
+    record_stage_error,
+    refresh_complete,
+    save_checkpoint,
+)
 from .playlists import PlaylistBuildReport, build_playlists
 from .portable import ImportPlan, PortableBundle, apply_import, plan_import, read_portable_bundle
 from .relink import RelinkReport, relink_library
@@ -44,6 +63,8 @@ class MigrationOptions:
     spotify_login: bool = False
     allow_partial: bool = False
     relink_limit: int | None = None
+    resume: bool = False
+    restart: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -55,13 +76,30 @@ class MigrationReport:
     audit: LibraryAuditReport | None = None
     doctor: DoctorReport | None = None
     applied: bool = False
+    checkpoint: MigrationCheckpoint | None = None
+    checkpoint_file: Path | None = None
+    resumed_stages: tuple[str, ...] = ()
 
     @property
     def operational_failures(self) -> int:
         relink_failures = len(self.relink.failures) if self.relink is not None else 0
         audit_failures = len(self.audit.failures) if self.audit is not None else 0
         doctor_failures = self.doctor.failures if self.doctor is not None else 0
-        return relink_failures + audit_failures + doctor_failures
+        resumed_failures = (
+            self.checkpoint.completed_failures(self.resumed_stages)
+            if self.checkpoint is not None
+            else 0
+        )
+        return relink_failures + audit_failures + doctor_failures + resumed_failures
+
+
+@dataclass(slots=True, frozen=True)
+class _MigrationPreflight:
+    bundle: PortableBundle
+    import_plan: ImportPlan
+    library_source: Path | None
+    checkpoint: MigrationCheckpoint | None
+    checkpoint_file: Path
 
 
 def _default_spotify_login(settings: Settings) -> None:
@@ -97,17 +135,139 @@ def _validate_library_source(source: Path | None) -> Path | None:
     return resolved
 
 
-def preview_migration(settings: Settings, options: MigrationOptions) -> MigrationReport:
-    """Validate migration inputs and portable-state conflicts without changing local state."""
+def _preflight(settings: Settings, options: MigrationOptions) -> _MigrationPreflight:
+    if options.resume and options.restart:
+        raise MigrationError("--resume and --restart cannot be used together")
+    if options.relink_limit is not None and options.relink_limit < 1:
+        raise MigrationError("relink limit must be at least 1")
+
     try:
         bundle = read_portable_bundle(options.portable_file)
         import_plan = plan_import(settings, bundle)
-    except (OSError, ValueError) as exc:
+        source = _validate_library_source(options.library_source)
+        identity = migration_identity(
+            options.portable_file,
+            library_source=source,
+            relink_limit=options.relink_limit,
+            allow_partial=options.allow_partial,
+        )
+        path = checkpoint_path(settings.home)
+        existing = load_checkpoint(path)
+    except (OSError, ValueError, MigrationCheckpointError) as exc:
         raise MigrationError(str(exc)) from exc
-    _validate_library_source(options.library_source)
-    if options.relink_limit is not None and options.relink_limit < 1:
-        raise MigrationError("relink limit must be at least 1")
-    return MigrationReport(import_plan=import_plan, applied=False)
+
+    if options.resume:
+        if existing is None:
+            raise MigrationError(f"no migration checkpoint exists at {path}; start with --apply first")
+        if existing.fingerprint != identity.fingerprint:
+            raise MigrationError(
+                "migration checkpoint does not match these inputs; use the original portable file/library/options "
+                "or start over with --restart"
+            )
+        checkpoint = existing
+    elif options.restart:
+        checkpoint = new_checkpoint(identity)
+    else:
+        checkpoint = existing
+
+    return _MigrationPreflight(bundle, import_plan, source, checkpoint, path)
+
+
+def preview_migration(settings: Settings, options: MigrationOptions) -> MigrationReport:
+    """Validate migration inputs/checkpoint state without changing local state."""
+    preflight = _preflight(settings, options)
+    resumed = (
+        preflight.checkpoint.completed_stages()
+        if options.resume and preflight.checkpoint is not None
+        else ()
+    )
+    return MigrationReport(
+        import_plan=preflight.import_plan,
+        applied=False,
+        checkpoint=preflight.checkpoint,
+        checkpoint_file=preflight.checkpoint_file,
+        resumed_stages=resumed,
+    )
+
+
+def _prepare_apply_checkpoint(
+    preflight: _MigrationPreflight,
+    options: MigrationOptions,
+) -> MigrationCheckpoint:
+    existing = preflight.checkpoint
+    try:
+        identity = migration_identity(
+            options.portable_file,
+            library_source=preflight.library_source,
+            relink_limit=options.relink_limit,
+            allow_partial=options.allow_partial,
+        )
+    except MigrationCheckpointError as exc:
+        raise MigrationError(str(exc)) from exc
+
+    if options.resume:
+        assert existing is not None
+        return existing
+    if options.restart:
+        checkpoint = new_checkpoint(identity)
+        save_checkpoint(preflight.checkpoint_file, checkpoint)
+        return checkpoint
+    if existing is not None:
+        if existing.fingerprint != identity.fingerprint:
+            raise MigrationError(
+                f"a migration checkpoint for different inputs exists at {preflight.checkpoint_file}; "
+                "use --restart to replace it"
+            )
+        if existing.complete:
+            raise MigrationError(
+                f"this migration checkpoint is already complete at {preflight.checkpoint_file}; "
+                "use --resume to inspect it or --restart to run the migration again"
+            )
+        raise MigrationError(
+            f"an incomplete migration checkpoint exists at {preflight.checkpoint_file}; "
+            "use --resume to continue it or --restart to start over"
+        )
+
+    checkpoint = new_checkpoint(identity)
+    try:
+        save_checkpoint(preflight.checkpoint_file, checkpoint)
+    except MigrationCheckpointError as exc:
+        raise MigrationError(str(exc)) from exc
+    return checkpoint
+
+
+def _save_checkpoint(
+    path: Path,
+    checkpoint: MigrationCheckpoint,
+    options: MigrationOptions,
+) -> None:
+    refresh_complete(
+        checkpoint,
+        has_library=options.library_source is not None,
+        spotify_login=options.spotify_login or checkpoint.is_completed(STAGE_SPOTIFY_LOGIN),
+    )
+    try:
+        save_checkpoint(path, checkpoint)
+    except MigrationCheckpointError as exc:
+        raise MigrationError(str(exc)) from exc
+
+
+def _record_error(
+    path: Path,
+    checkpoint: MigrationCheckpoint,
+    options: MigrationOptions,
+    stage: str,
+    exc: Exception,
+) -> None:
+    record_stage_error(checkpoint, stage, str(exc))
+    _save_checkpoint(path, checkpoint, options)
+
+
+def _resumed(checkpoint: MigrationCheckpoint, stage: str, resumed: list[str]) -> bool:
+    if not checkpoint.is_completed(stage):
+        return False
+    resumed.append(stage)
+    return True
 
 
 def run_migration(
@@ -118,66 +278,209 @@ def run_migration(
     fetch_snapshot_fn: SnapshotFetcher = _default_fetch_snapshot,
     doctor_fn: DoctorRunner = _default_doctor,
 ) -> MigrationReport:
-    """Apply portable setup, refresh desired state, relink audio, rebuild, and diagnose."""
-    try:
-        bundle: PortableBundle = read_portable_bundle(options.portable_file)
-        # Preflight target/config compatibility before the first write.
-        plan_import(settings, bundle)
-        source = _validate_library_source(options.library_source)
-        import_plan = apply_import(settings, bundle)
-    except (OSError, ValueError) as exc:
-        raise MigrationError(str(exc)) from exc
+    """Apply or resume portable setup, desired state, relink, rebuild, and diagnostics."""
+    preflight = _preflight(settings, options)
+    checkpoint = _prepare_apply_checkpoint(preflight, options)
+    resumed: list[str] = []
 
-    try:
-        if options.spotify_login:
-            spotify_login_fn(settings)
-        snapshot = fetch_snapshot_fn(settings)
-    except Exception as exc:
-        raise MigrationError(f"Spotify migration stage failed: {exc}") from exc
+    import_plan = preflight.import_plan
+    if not _resumed(checkpoint, STAGE_PORTABLE_IMPORT, resumed):
+        try:
+            import_plan = apply_import(settings, preflight.bundle)
+            mark_stage_completed(
+                checkpoint,
+                STAGE_PORTABLE_IMPORT,
+                summary={
+                    "config_keys": len(import_plan.config_keys),
+                    "spotify_action": import_plan.spotify_action,
+                    "targets": len(import_plan.targets),
+                },
+            )
+            _save_checkpoint(preflight.checkpoint_file, checkpoint, options)
+        except Exception as exc:
+            _record_error(
+                preflight.checkpoint_file,
+                checkpoint,
+                options,
+                STAGE_PORTABLE_IMPORT,
+                exc,
+            )
+            raise MigrationError(f"portable import stage failed: {exc}") from exc
 
-    settings.ensure_directories()
-    initialize(settings.database_path)
-    try:
-        with connect(settings.database_path) as connection:
-            spotify_plan = plan_snapshot(connection, snapshot)
-            apply_snapshot(connection, snapshot)
-    except Exception as exc:
-        raise MigrationError(f"could not apply Spotify desired state: {exc}") from exc
+    if options.spotify_login:
+        if not _resumed(checkpoint, STAGE_SPOTIFY_LOGIN, resumed):
+            try:
+                spotify_login_fn(settings)
+                mark_stage_completed(
+                    checkpoint,
+                    STAGE_SPOTIFY_LOGIN,
+                    summary={"status": "authenticated"},
+                )
+                _save_checkpoint(preflight.checkpoint_file, checkpoint, options)
+            except Exception as exc:
+                _record_error(
+                    preflight.checkpoint_file,
+                    checkpoint,
+                    options,
+                    STAGE_SPOTIFY_LOGIN,
+                    exc,
+                )
+                raise MigrationError(f"Spotify login stage failed: {exc}") from exc
+
+    spotify_plan: ChangePlan | None = None
+    if not _resumed(checkpoint, STAGE_SPOTIFY_REFRESH, resumed):
+        try:
+            snapshot = fetch_snapshot_fn(settings)
+            settings.ensure_directories()
+            initialize(settings.database_path)
+            with connect(settings.database_path) as connection:
+                spotify_plan = plan_snapshot(connection, snapshot)
+                apply_snapshot(connection, snapshot)
+            mark_stage_completed(
+                checkpoint,
+                STAGE_SPOTIFY_REFRESH,
+                summary={
+                    "tracks_added": spotify_plan.tracks_added,
+                    "tracks_removed": spotify_plan.tracks_removed,
+                    "playlists_added": len(spotify_plan.playlists_added),
+                    "playlists_removed": len(spotify_plan.playlists_removed),
+                },
+            )
+            _save_checkpoint(preflight.checkpoint_file, checkpoint, options)
+        except Exception as exc:
+            _record_error(
+                preflight.checkpoint_file,
+                checkpoint,
+                options,
+                STAGE_SPOTIFY_REFRESH,
+                exc,
+            )
+            raise MigrationError(f"Spotify migration stage failed: {exc}") from exc
+    elif not settings.database_path.exists():
+        raise MigrationError(
+            "checkpoint says Spotify desired state was restored, but the local database is missing; use --restart"
+        )
 
     relink_report: RelinkReport | None = None
-    if source is not None:
+    if preflight.library_source is not None:
+        if not _resumed(checkpoint, STAGE_LIBRARY_RELINK, resumed):
+            try:
+                with connect(settings.database_path) as connection:
+                    relink_report = relink_library(
+                        connection,
+                        preflight.library_source,
+                        settings.library_dir,
+                        apply=True,
+                        limit=options.relink_limit,
+                    )
+                mark_stage_completed(
+                    checkpoint,
+                    STAGE_LIBRARY_RELINK,
+                    operational_failures=len(relink_report.failures),
+                    summary={
+                        "safe_matches": len(relink_report.matches),
+                        "copied": relink_report.copied,
+                        "adopted": relink_report.adopted,
+                        "reused": relink_report.reused,
+                        "unmatched": len(relink_report.unmatched),
+                        "failures": len(relink_report.failures),
+                    },
+                )
+                _save_checkpoint(preflight.checkpoint_file, checkpoint, options)
+            except Exception as exc:
+                _record_error(
+                    preflight.checkpoint_file,
+                    checkpoint,
+                    options,
+                    STAGE_LIBRARY_RELINK,
+                    exc,
+                )
+                raise MigrationError(f"library relink stage failed: {exc}") from exc
+
+    playlists_report: PlaylistBuildReport | None = None
+    if not _resumed(checkpoint, STAGE_PLAYLISTS, resumed):
         try:
             with connect(settings.database_path) as connection:
-                relink_report = relink_library(
+                playlists_report = build_playlists(
                     connection,
-                    source,
-                    settings.library_dir,
-                    apply=True,
-                    limit=options.relink_limit,
+                    settings.playlists_dir,
+                    allow_partial=options.allow_partial,
                 )
+            mark_stage_completed(
+                checkpoint,
+                STAGE_PLAYLISTS,
+                summary={
+                    "written": playlists_report.written,
+                    "incomplete": playlists_report.incomplete,
+                },
+            )
+            _save_checkpoint(preflight.checkpoint_file, checkpoint, options)
         except Exception as exc:
-            raise MigrationError(f"library relink stage failed: {exc}") from exc
-
-    try:
-        with connect(settings.database_path) as connection:
-            playlists_report = build_playlists(
-                connection,
-                settings.playlists_dir,
-                allow_partial=options.allow_partial,
+            _record_error(
+                preflight.checkpoint_file,
+                checkpoint,
+                options,
+                STAGE_PLAYLISTS,
+                exc,
             )
-            audit_report = audit_library(
-                connection,
-                settings.library_dir,
-                repair=False,
-            )
-    except Exception as exc:
-        raise MigrationError(f"post-migration library stage failed: {exc}") from exc
+            raise MigrationError(f"playlist rebuild stage failed: {exc}") from exc
 
-    try:
-        doctor_report = doctor_fn(settings)
-    except Exception as exc:
-        raise MigrationError(f"doctor stage failed: {exc}") from exc
+    audit_report: LibraryAuditReport | None = None
+    if not _resumed(checkpoint, STAGE_AUDIT, resumed):
+        try:
+            with connect(settings.database_path) as connection:
+                audit_report = audit_library(
+                    connection,
+                    settings.library_dir,
+                    repair=False,
+                )
+            if audit_report.failures:
+                record_stage_error(
+                    checkpoint,
+                    STAGE_AUDIT,
+                    f"audit reported {len(audit_report.failures)} operational failure(s)",
+                )
+            else:
+                mark_stage_completed(
+                    checkpoint,
+                    STAGE_AUDIT,
+                    summary={
+                        "issues": len(audit_report.issues),
+                        "untracked_flacs": len(audit_report.untracked_files),
+                        "failures": 0,
+                    },
+                )
+            _save_checkpoint(preflight.checkpoint_file, checkpoint, options)
+        except Exception as exc:
+            _record_error(preflight.checkpoint_file, checkpoint, options, STAGE_AUDIT, exc)
+            raise MigrationError(f"library audit stage failed: {exc}") from exc
 
+    doctor_report: DoctorReport | None = None
+    if not _resumed(checkpoint, STAGE_DOCTOR, resumed):
+        try:
+            doctor_report = doctor_fn(settings)
+            if doctor_report.failures:
+                record_stage_error(
+                    checkpoint,
+                    STAGE_DOCTOR,
+                    f"doctor reported {doctor_report.failures} failure(s)",
+                )
+            else:
+                mark_stage_completed(
+                    checkpoint,
+                    STAGE_DOCTOR,
+                    summary={
+                        "passed": doctor_report.passed,
+                        "warnings": doctor_report.warnings,
+                        "failures": 0,
+                    },
+                )
+            _save_checkpoint(preflight.checkpoint_file, checkpoint, options)
+        except Exception as exc:
+            _record_error(preflight.checkpoint_file, checkpoint, options, STAGE_DOCTOR, exc)
+            raise MigrationError(f"doctor stage failed: {exc}") from exc
+
+    _save_checkpoint(preflight.checkpoint_file, checkpoint, options)
     return MigrationReport(
         import_plan=import_plan,
         spotify_plan=spotify_plan,
@@ -186,7 +489,31 @@ def run_migration(
         audit=audit_report,
         doctor=doctor_report,
         applied=True,
+        checkpoint=checkpoint,
+        checkpoint_file=preflight.checkpoint_file,
+        resumed_stages=tuple(resumed),
     )
+
+
+def _checkpoint_lines(report: MigrationReport) -> list[str]:
+    checkpoint = report.checkpoint
+    if checkpoint is None or report.checkpoint_file is None:
+        return []
+    completed = checkpoint.completed_stages()
+    lines = [
+        "",
+        "Checkpoint",
+        f"  File: {report.checkpoint_file}",
+        f"  Complete: {'yes' if checkpoint.complete else 'no'}",
+        "  Completed stages: " + (", ".join(completed) if completed else "none"),
+    ]
+    if report.resumed_stages:
+        lines.append("  Resumed/skipped: " + ", ".join(report.resumed_stages))
+    if checkpoint.last_error_stage is not None:
+        lines.append(
+            f"  Last error: {checkpoint.last_error_stage}: {checkpoint.last_error or 'unknown error'}"
+        )
+    return lines
 
 
 def format_migration_report(report: MigrationReport) -> str:
@@ -203,6 +530,7 @@ def format_migration_report(report: MigrationReport) -> str:
         )
     else:
         lines.append("  Targets: none")
+    lines.extend(_checkpoint_lines(report))
 
     if not report.applied:
         lines.extend(
@@ -216,10 +544,11 @@ def format_migration_report(report: MigrationReport) -> str:
                 "  5. Rebuild generated playlists",
                 "  6. Run library audit",
                 "  7. Run Synctify doctor",
-                "",
-                "No local state was changed. Re-run with --apply to migrate.",
             ]
         )
+        if report.resumed_stages:
+            lines.append("  Completed checkpoint stages above will be skipped on --apply --resume.")
+        lines.extend(["", "No local state was changed. Re-run with --apply to migrate."])
         return "\n".join(lines)
 
     if report.spotify_plan is not None:

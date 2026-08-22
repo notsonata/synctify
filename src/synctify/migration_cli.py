@@ -41,6 +41,16 @@ def migrate_command(
         "--apply",
         help="Run the migration. Without this flag, validate and show the planned stages only.",
     ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Resume a matching migration checkpoint and skip stages already completed safely.",
+    ),
+    restart: bool = typer.Option(
+        False,
+        "--restart",
+        help="Replace an existing migration checkpoint and run all stages again.",
+    ),
     spotify_login: bool = typer.Option(
         False,
         "--spotify-login",
@@ -58,7 +68,10 @@ def migrate_command(
         help="Inspect at most this many missing desired tracks during the optional relink stage.",
     ),
 ) -> None:
-    """Restore a Synctify setup, desired state, local library links, playlists, and diagnostics."""
+    """Restore or resume Synctify setup, desired state, local library links, and diagnostics."""
+    if resume and restart:
+        raise typer.BadParameter("--resume and --restart cannot be used together")
+
     settings = Settings.default()
     options = MigrationOptions(
         portable_file=portable_file,
@@ -66,6 +79,8 @@ def migrate_command(
         spotify_login=spotify_login,
         allow_partial=allow_partial,
         relink_limit=relink_limit,
+        resume=resume,
+        restart=restart,
     )
 
     try:
@@ -78,6 +93,11 @@ def migrate_command(
     if report.applied and report.playlists is not None and report.playlists.incomplete:
         typer.echo(
             "Some playlists remain incomplete. Run `synctify audit` and acquire or relink the missing tracks.",
+            err=True,
+        )
+    if report.applied and report.checkpoint is not None and not report.checkpoint.complete:
+        typer.echo(
+            "Migration checkpoint is incomplete. Fix the reported stage and rerun with --resume.",
             err=True,
         )
     if report.operational_failures:
