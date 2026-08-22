@@ -27,8 +27,8 @@ Quick start
 
    synctify
 
-The TUI now includes Import Spotify and Full Update actions plus a Commands tab
-for non-interactive Synctify commands. Import Spotify runs the existing
+The TUI includes Import Spotify and Full Update actions plus a Commands tab for
+non-interactive Synctify commands. Import Spotify runs the existing
 `synctify spotify pull` desired-state import. Full Update runs the coordinated
 Spotify, resolution, acquisition, and playlist workflow. Long-running commands
 stream their stdout/stderr into the TUI.
@@ -39,35 +39,38 @@ The stable command can run every normal CLI command, for example:
    synctify update --dry-run
    synctify update
 
+`synctify update` updates the Spotify/library state. It does not mean application
+upgrade.
+
 Long update operations print their current stage while Spotify state is fetched,
 tracks are resolved through each source, downloads are planned or run, and
 playlist readiness/building is checked. Progress goes to stderr while the final
 structured update report remains on stdout.
 
-Installed Synctify checks for a newer stable release every time `synctify` is
-run. When a newer release is available in an interactive Terminal, the default
-behavior is:
+Installed Synctify checks for a newer stable application release every time
+`synctify` is run. When a newer release is available in an interactive Terminal,
+the default behavior is:
 
-   Synctify 1.1.1 is available (current: 1.1.0). Update now? [Y/n]
+   Synctify application 1.1.2 is available (current: 1.1.1). Upgrade now? [Y/n]
 
 Answering yes downloads the matching macOS release bundle, validates it,
 installs it into a new versioned app directory, switches app/current, and
 restarts the command under the new version. Non-interactive scripts are never
-blocked for input; they receive an update notice and continue.
+blocked for input; they receive an application-upgrade notice and continue.
 
-Check or update explicitly at any time:
+Check or upgrade the application explicitly at any time:
 
-   synctify self-update --check
-   synctify self-update
+   synctify upgrade --check
+   synctify upgrade
 
-Update policy can be changed with:
+Upgrade policy can be changed with:
 
    synctify config set auto-update prompt
    synctify config set auto-update check
    synctify config set auto-update install
    synctify config set auto-update off
 
-`prompt` is the default. `check` only prints a notice, `install` updates without
+`prompt` is the default. `check` only prints a notice, `install` upgrades without
 asking, and `off` disables automatic checks. SYNCTIFY_AUTO_UPDATE can override
 the saved value.
 
@@ -76,7 +79,7 @@ is private, authenticate GitHub CLI with `gh auth login` or set
 SYNCTIFY_GITHUB_TOKEN (GH_TOKEN and GITHUB_TOKEN are also recognized).
 
 The extracted bundle can still be used portably without installation. Portable
-runs do not perform automatic update checks:
+runs do not perform automatic upgrade checks:
 
    ./synctify.sh
    ./synctify.sh doctor
@@ -119,7 +122,7 @@ It switches this stable pointer to the installed release:
 
 The ~/.local/bin/synctify wrapper always launches app/current/synctify.sh and
 marks the process as an installed invocation. This keeps the command path stable
-across releases and lets the updater install a complete version before switching
+across releases and lets the upgrader install a complete version before switching
 `current`.
 
 Each installed release creates and reuses its own private .venv when first run.

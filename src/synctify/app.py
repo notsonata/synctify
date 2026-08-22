@@ -93,7 +93,7 @@ def _restart_under_installed_release(version: str) -> None:
     command = bin_dir / "synctify"
     if not command.is_file():
         typer.echo(
-            f"Synctify updated to {version}. Re-run your command to use the new version.",
+            f"Synctify upgraded to {version}. Re-run your command to use the new version.",
             err=True,
         )
         return
@@ -106,7 +106,7 @@ def _restart_under_installed_release(version: str) -> None:
 @app.callback()
 def automatic_update_callback(ctx: typer.Context) -> None:
     """Check the latest release before every installed Synctify invocation."""
-    if ctx.invoked_subcommand == "self-update":
+    if ctx.invoked_subcommand == "upgrade":
         return
     if os.getenv("SYNCTIFY_INSTALLED") != "1" or os.getenv("SYNCTIFY_SKIP_AUTO_UPDATE") == "1":
         return
@@ -122,7 +122,7 @@ def automatic_update_callback(ctx: typer.Context) -> None:
     result = run_automatic_update(mode, __version__)
     if result.error:
         if _interactive_terminal() or mode == "install":
-            typer.echo(f"Synctify update check failed: {result.error}", err=True)
+            typer.echo(f"Synctify application upgrade check failed: {result.error}", err=True)
         return
     if result.release is None:
         return
@@ -130,7 +130,7 @@ def automatic_update_callback(ctx: typer.Context) -> None:
     release = result.release
     if result.installed:
         typer.echo(
-            f"Synctify updated automatically: {__version__} -> {release.version}.",
+            f"Synctify application upgraded automatically: {__version__} -> {release.version}.",
             err=True,
         )
         _restart_under_installed_release(release.version)
@@ -138,8 +138,8 @@ def automatic_update_callback(ctx: typer.Context) -> None:
 
     if mode == "check" or not _interactive_terminal():
         typer.echo(
-            f"Synctify {release.version} is available (current: {__version__}). "
-            "Run `synctify self-update` to install it.",
+            f"Synctify application {release.version} is available (current: {__version__}). "
+            "Run `synctify upgrade` to install it.",
             err=True,
         )
         return
@@ -147,7 +147,7 @@ def automatic_update_callback(ctx: typer.Context) -> None:
     if mode != "prompt":
         return
     if not typer.confirm(
-        f"Synctify {release.version} is available (current: {__version__}). Update now?",
+        f"Synctify application {release.version} is available (current: {__version__}). Upgrade now?",
         default=True,
     ):
         return
@@ -157,10 +157,10 @@ def automatic_update_callback(ctx: typer.Context) -> None:
         with github_client(token) as client:
             install_release(release, client)
     except UpdateError as exc:
-        typer.echo(f"Synctify update failed: {exc}", err=True)
+        typer.echo(f"Synctify application upgrade failed: {exc}", err=True)
         return
 
-    typer.echo(f"Synctify updated: {__version__} -> {release.version}.", err=True)
+    typer.echo(f"Synctify application upgraded: {__version__} -> {release.version}.", err=True)
     _restart_under_installed_release(release.version)
 
 
@@ -216,7 +216,7 @@ app.command("export")(export_command)
 app.command("import")(import_command)
 app.command("relink")(relink_command)
 app.command("migrate")(migrate_command)
-app.command("self-update")(self_update_command)
+app.command("upgrade")(self_update_command)
 
 # Spotify commands.
 spotify_app.command("login")(spotify_login)

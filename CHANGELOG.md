@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.1 - 2026-08-23
+
+Synctify 1.1.1 separates application upgrades from music-library updates so the two operations no longer share confusing terminology.
+
+### Upgrade command
+
+- replace the public `synctify self-update` command with `synctify upgrade`
+- keep `synctify upgrade --check` for checking the latest stable application release without installing it
+- reserve `synctify update` exclusively for the Spotify, resolution, acquisition, and playlist workflow
+- change automatic release prompts and notices to say `application` and `upgrade` explicitly
+- resume the original command after an accepted automatic application upgrade using the existing installed-wrapper handoff
+- update packaged CLI, macOS bundle, and release-workflow smoke tests to require `upgrade` and reject the removed `self-update` command
+
+No SQLite schema migration is required for this release.
+
 ## 1.1.0 - 2026-08-23
 
 Synctify 1.1.0 turns the Textual TUI into an operational frontend for the existing CLI workflows instead of limiting it to local state and diagnostics.
