@@ -136,7 +136,7 @@ def pending_playlist_snapshots(
             "playlists",
             "snapshots",
             path.stem,
-            f"{timestamp}.m3u8",
+            f"{timestamp}-{sha256[:12]}.m3u8",
         )
         snapshots.append(
             PlaylistSnapshot(
