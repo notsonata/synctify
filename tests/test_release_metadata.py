@@ -14,7 +14,7 @@ def test_release_version_is_consistent() -> None:
     version = pyproject["project"]["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert version == "1.2.1"
+    assert version == "1.2.2"
     assert synctify.__version__ == version
     assert f"**Current version: {version}**" in readme
 
@@ -42,13 +42,13 @@ def test_readme_describes_current_automatic_resolution_contract() -> None:
 def test_readme_documents_release_zip_launcher() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "synctify-1.2.1-macos.zip" in readme
+    assert "synctify-1.2.2-macos.zip" in readme
     assert "./synctify.sh" in readme
     assert "./synctify.sh install" in readme
     assert "~/.local/bin/synctify" in readme
     assert "app/current" in readme
     assert "private `.venv`" in readme
-    assert "synctify-1.2.1.tar.gz" in readme
+    assert "synctify-1.2.2.tar.gz" in readme
     assert "matching Python wheel bundled inside the macOS ZIP" in readme
     assert "The GitHub Release also includes `SHA256SUMS`" not in readme
 
@@ -76,6 +76,8 @@ def test_readme_documents_staged_spotify_flow() -> None:
     assert "Track exclusions are persistent" in readme
     assert "does **not** fetch every song in every playlist" in readme
     assert "does not fetch Spotify playlists" in readme
+    assert "does **not** resolve providers" in readme
+    assert "never contacts Qobuz, Tidal, or Deezer" in readme
 
 
 def test_readme_documents_tui_playlist_browser_and_cancellation() -> None:
@@ -100,6 +102,14 @@ def test_readme_documents_safe_unimport_and_non_destructive_backups() -> None:
     assert "copy-only semantics" in readme
 
 
+def test_readme_documents_local_flac_reuse_before_resolution() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "scans the canonical library once" in readme
+    assert "valid canonical `local_path` never enters automatic provider resolution" in readme
+    assert "files you already have are reused rather than downloaded again" in readme
+
+
 def test_readme_documents_update_progress() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -116,11 +126,12 @@ def test_readme_documents_configurable_library() -> None:
     assert "--library /absolute/path/to/Music" in readme
 
 
-def test_readme_documents_schema_v6() -> None:
+def test_readme_documents_schema_v7_review_migration() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "schema v6" in readme
-    assert "persistent track exclusions" in readme
+    assert "schema v7" in readme
+    assert "previously included items become pending additions" in readme
+    assert "does not delete track rows, local FLAC files" in readme
 
 
 def test_installed_entry_point_uses_explicit_cli_app() -> None:
