@@ -17,7 +17,12 @@ from .user_config import (
     resolve_source_priority,
     resolve_streamrip,
 )
-from .workflow import format_update_workflow_report
+from .workflow import UpdateWorkflowReport, format_update_workflow_report
+
+
+def _primary_failures(report: UpdateWorkflowReport) -> int:
+    """Count actual provider/search/download errors, not unresolved review state."""
+    return report.resolution_failures + sum(group.failed for group in report.acquisitions)
 
 
 def configured_update(
@@ -101,8 +106,5 @@ def configured_update(
 
     # Unresolved tracks are an expected review state, not an operational crash.
     # Reserve exit status 2 for actual search/download/provider errors.
-    primary_failures = report.resolution_failures + sum(
-        group.failed for group in report.acquisitions
-    )
-    if primary_failures:
+    if _primary_failures(report):
         raise typer.Exit(code=2)
