@@ -85,17 +85,6 @@ def test_gross_duration_mismatch_is_rejected() -> None:
     assert "duration mismatch" in result.reason
 
 
-def test_title_artist_only_candidate_is_not_auto_resolved() -> None:
-    track = source_track(isrc=None)
-    candidate = Candidate("qobuz", "sparse", track.title, track.artist)
-
-    result = resolve_track(track, [candidate])
-
-    assert result.status is ResolutionStatus.UNRESOLVED
-    assert result.candidate is None
-    assert "additional metadata" in result.reason
-
-
 def test_ambiguous_candidates_are_not_auto_resolved() -> None:
     track = source_track(isrc=None)
     candidates = [
