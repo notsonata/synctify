@@ -14,6 +14,7 @@ from .auto_resolution import (
     format_auto_resolution_report,
     pending_resolution_tracks,
 )
+from .models import Track
 from .playlists import (
     PlaylistBuildReport,
     build_playlists,
@@ -205,11 +206,26 @@ def _run_resolution_priority(
         _notify(progress, "No unresolved tracks need automatic resolution.")
         return priority, ()
 
+    def track_progress(source: str, index: int, total: int, track: Track) -> None:
+        _notify(
+            progress,
+            f"Resolving via {source} [{index}/{total}] {track.artist} - {track.title}",
+        )
+
     reports: list[AutoResolutionReport] = []
     for source in priority:
         pending = pending_resolution_tracks(connection, spotify_ids=selected_ids)
         if not pending:
             break
+
+        readiness_check = getattr(search_provider, "require_noninteractive_source_ready", None)
+        if callable(readiness_check):
+            try:
+                readiness_check(source)
+            except (OSError, RuntimeError, ValueError) as exc:
+                _notify(progress, f"Skipping {source}: {exc}")
+                continue
+
         _notify(progress, f"Resolving {len(pending)} track(s) via {source}...")
         report = auto_resolve_tracks(
             connection,
@@ -218,6 +234,7 @@ def _run_resolution_priority(
             search_results=search_results,
             dry_run=False,
             spotify_ids=selected_ids,
+            progress=track_progress,
         )
         if preview:
             report = replace(report, dry_run=True)
