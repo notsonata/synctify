@@ -231,6 +231,7 @@ def run_cli_command(
 
     environment = os.environ.copy()
     environment["SYNCTIFY_HOME"] = str(settings.home)
+    environment["SYNCTIFY_LIBRARY_DIR"] = str(settings.library_dir)
     environment["SYNCTIFY_SKIP_AUTO_UPDATE"] = "1"
     environment["PYTHONUNBUFFERED"] = "1"
 
