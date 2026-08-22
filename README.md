@@ -9,7 +9,7 @@ Synctify is a local-first macOS music library manager. Spotify defines the desir
 ```text
 Spotify desired state
         ↓
-Automatic resolution
+Automatic resolution via Streamrip catalog search
 Qobuz → Tidal → Deezer
         ↓
 External downloader
@@ -29,10 +29,11 @@ Spotify is used for metadata and desired playlist state only. Synctify does not 
 - macOS
 - Python 3.12+
 - Spotify developer application for playlist/library import
-- qobuz-dl and/or Streamrip for acquisition
+- Streamrip for automatic catalog resolution and for Tidal/Deezer acquisition
+- qobuz-dl for the default Qobuz acquisition path; Qobuz may alternatively use Streamrip
 - rclone for mirrors and cloud backups
 
-External downloaders are not vendored by Synctify and must be installed/configured separately.
+Streamrip is required for automatic catalog resolution used by `synctify resolve auto` and the coordinated `synctify update` workflow. Installing qobuz-dl alone is sufficient only for acquiring tracks that already have Qobuz resolutions. External downloaders are not vendored by Synctify and must be installed/configured separately.
 
 ## Install
 
@@ -53,7 +54,7 @@ The canonical library is lossless-only. Automatic fallback uses:
 Qobuz → Tidal → Deezer
 ```
 
-Qobuz uses qobuz-dl by default. Tidal and Deezer use Streamrip. Qobuz may also use Streamrip explicitly.
+Automatic resolution uses Streamrip catalog search for all supported sources. Qobuz uses qobuz-dl by default for acquisition; Tidal and Deezer use Streamrip. Qobuz may also use Streamrip explicitly.
 
 Supported qobuz-dl quality values are `6`, `7`, and `27`. Quality `5` is MP3 and is not accepted for new runtime settings.
 
@@ -140,7 +141,7 @@ synctify update
 The workflow:
 
 1. refreshes Spotify desired state
-2. resolves unresolved desired tracks using the configured source priority
+2. resolves unresolved desired tracks using Streamrip catalog search and the configured source priority
 3. acquires resolved tracks
 4. reconciles safely matching existing FLAC files when a downloader reports an existing download
 5. rebuilds generated playlists
@@ -169,7 +170,9 @@ synctify resolve set SPOTIFY_TRACK_ID qobuz QOBUZ_TRACK_ID
 synctify resolve clear SPOTIFY_TRACK_ID
 ```
 
-Automatic resolution prefers exact normalized ISRC. Metadata fallback uses title, artist, album, and duration, applies ambiguity protection, and refuses gross duration mismatches or insufficient evidence.
+Automatic Streamrip resolution currently requires a usable Spotify ISRC. Synctify searches both that ISRC and the track's artist/title, and accepts a catalog candidate only when the same provider track ID appears in both query result sets. Tracks without a Spotify ISRC, or without cross-query agreement, remain unresolved for manual handling rather than being guessed from title/artist alone.
+
+The generic deterministic matcher used for richer candidates and local-FLAC reconciliation still supports normalized ISRC plus title/artist/album/duration scoring, ambiguity protection, and gross-duration mismatch rejection when that metadata is available.
 
 Inspect/acquire resolved tracks:
 
@@ -347,4 +350,4 @@ python -m compileall -q src tests
 python -m pytest
 ```
 
-GitHub Actions runs the test suite on macOS.
+GitHub Actions runs the test suite on macOS across supported Python versions and smoke-tests the built wheel in an isolated virtual environment.
