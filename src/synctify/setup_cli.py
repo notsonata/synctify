@@ -44,7 +44,7 @@ def setup_command(
     source_priority: str | None = typer.Option(
         None,
         "--sources",
-        help="Comma-separated automatic source priority.",
+        help="Comma-separated automatic source priority: qobuz, tidal, deezer.",
     ),
     qobuz_dl: str | None = typer.Option(
         None,
@@ -64,7 +64,7 @@ def setup_command(
     qobuz_quality: int | None = typer.Option(
         None,
         "--qobuz-quality",
-        help="Saved qobuz-dl quality: 5, 6, 7, or 27.",
+        help="Saved lossless qobuz-dl quality: 6, 7, or 27.",
     ),
     streamrip_qobuz_quality: int | None = typer.Option(
         None,
@@ -80,11 +80,6 @@ def setup_command(
         None,
         "--streamrip-deezer-quality",
         help="Saved Streamrip Deezer quality: 0-4.",
-    ),
-    streamrip_soundcloud_quality: int | None = typer.Option(
-        None,
-        "--streamrip-soundcloud-quality",
-        help="Saved Streamrip SoundCloud quality: 0-4.",
     ),
     spotify_client_id: str | None = typer.Option(
         None,
@@ -164,11 +159,6 @@ def setup_command(
             current.streamrip_deezer_quality,
             streamrip_deezer_quality,
         )
-        streamrip_soundcloud_quality = _prompt_int(
-            "Streamrip SoundCloud quality",
-            current.streamrip_soundcloud_quality,
-            streamrip_soundcloud_quality,
-        )
 
         if spotify_client_id is None:
             current_client = existing_spotify.client_id if existing_spotify else ""
@@ -214,7 +204,6 @@ def setup_command(
         streamrip_qobuz_quality=streamrip_qobuz_quality,
         streamrip_tidal_quality=streamrip_tidal_quality,
         streamrip_deezer_quality=streamrip_deezer_quality,
-        streamrip_soundcloud_quality=streamrip_soundcloud_quality,
         spotify_client_id=spotify_client_id,
         spotify_redirect_uri=spotify_redirect_uri,
         mirror_name=mirror_name,
