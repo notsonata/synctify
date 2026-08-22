@@ -131,12 +131,33 @@ def pending_playlist_snapshots(
         ).fetchone()
         if latest is not None and latest["sha256"] == sha256:
             continue
-        remote_path = _remote_join(
+
+        base_remote_path = _remote_join(
             target.destination,
             "playlists",
             "snapshots",
             path.stem,
-            f"{timestamp}-{sha256[:12]}.m3u8",
+            f"{timestamp}.m3u8",
+        )
+        collision = connection.execute(
+            """
+            SELECT 1
+            FROM playlist_backup_snapshots
+            WHERE target_id = ? AND remote_path = ?
+            LIMIT 1
+            """,
+            (target.id, base_remote_path),
+        ).fetchone()
+        remote_path = (
+            _remote_join(
+                target.destination,
+                "playlists",
+                "snapshots",
+                path.stem,
+                f"{timestamp}-{sha256[:12]}.m3u8",
+            )
+            if collision is not None
+            else base_remote_path
         )
         snapshots.append(
             PlaylistSnapshot(
