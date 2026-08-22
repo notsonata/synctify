@@ -73,11 +73,27 @@ class UpdateWorkflowReport:
 
     @property
     def resolution(self) -> AutoResolutionReport:
-        """Compatibility view for callers that previously expected one source report."""
-        if self.resolutions:
+        """Compatibility view containing each track's final fallback outcome."""
+        if not self.resolutions:
+            source = self.resolution_sources[0] if self.resolution_sources else "none"
+            return AutoResolutionReport(source, (), self.dry_run)
+        if len(self.resolutions) == 1:
             return self.resolutions[0]
-        source = self.resolution_sources[0] if self.resolution_sources else "none"
-        return AutoResolutionReport(source, (), self.dry_run)
+
+        order: list[str] = []
+        final_attempts = {}
+        for report in self.resolutions:
+            for attempt in report.attempts:
+                spotify_id = attempt.track.spotify_id
+                if spotify_id not in final_attempts:
+                    order.append(spotify_id)
+                final_attempts[spotify_id] = attempt
+        source = " -> ".join(self.resolution_sources)
+        return AutoResolutionReport(
+            source,
+            tuple(final_attempts[spotify_id] for spotify_id in order),
+            self.dry_run,
+        )
 
     @property
     def resolution_failures(self) -> int:
