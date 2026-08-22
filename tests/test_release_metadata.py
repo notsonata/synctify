@@ -14,7 +14,7 @@ def test_release_version_is_consistent() -> None:
     version = pyproject["project"]["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert version == "1.1.0"
+    assert version == "1.1.1"
     assert synctify.__version__ == version
     assert f"**Current version: {version}**" in readme
 
@@ -40,23 +40,24 @@ def test_readme_describes_current_automatic_resolution_contract() -> None:
 def test_readme_documents_release_zip_launcher() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "synctify-1.1.0-macos.zip" in readme
+    assert "synctify-1.1.1-macos.zip" in readme
     assert "./synctify.sh" in readme
     assert "./synctify.sh install" in readme
     assert "~/.local/bin/synctify" in readme
     assert "app/current" in readme
     assert "private `.venv`" in readme
-    assert "synctify-1.1.0.tar.gz" in readme
+    assert "synctify-1.1.1.tar.gz" in readme
     assert "matching Python wheel is bundled inside the macOS ZIP" in readme
     assert "The GitHub Release also includes `SHA256SUMS`" not in readme
 
 
-def test_readme_documents_self_update_policy() -> None:
+def test_readme_documents_upgrade_policy() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "synctify self-update --check" in readme
-    assert "synctify self-update" in readme
-    assert "Update now? [Y/n]" in readme
+    assert "synctify upgrade --check" in readme
+    assert "synctify upgrade" in readme
+    assert "Upgrade now? [Y/n]" in readme
+    assert "synctify self-update" not in readme
     assert "synctify config set auto-update prompt" in readme
     assert "SYNCTIFY_AUTO_UPDATE" in readme
     assert "gh auth login" in readme
