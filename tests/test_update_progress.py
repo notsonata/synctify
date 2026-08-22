@@ -21,7 +21,7 @@ def test_update_snapshot_reports_progress_before_loading_spotify_config(
     def fail_load(_path: Path):
         raise RuntimeError("stop after progress message")
 
-    monkeypatch.setattr(cli_entry.SpotifyOAuthConfig, "load", fail_load)
+    monkeypatch.setattr(cli_entry.SpotifyOAuthConfig, "load", staticmethod(fail_load))
 
     with pytest.raises(RuntimeError, match="stop after progress message"):
         cli_entry._fetch_update_snapshot(SettingsStub())  # type: ignore[arg-type]
