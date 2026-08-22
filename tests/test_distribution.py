@@ -77,7 +77,7 @@ def test_installer_creates_stable_command_and_versioned_app_layout(tmp_path: Pat
     (bundle / "README.txt").write_text("test bundle\n", encoding="utf-8")
     (bundle / f"synctify-{version}-py3-none-any.whl").write_bytes(b"wheel")
     (bundle / "synctify.sh").write_text(
-        '#!/bin/bash\nprintf "launcher:%s\\n" "$*"\n',
+        '#!/bin/bash\nprintf "launcher:%s:%s:%s\\n" "$SYNCTIFY_INSTALLED" "$SYNCTIFY_BIN_DIR" "$*"\n',
         encoding="utf-8",
     )
     os.chmod(bundle / "install.sh", 0o755)
@@ -125,7 +125,16 @@ def test_installer_creates_stable_command_and_versioned_app_layout(tmp_path: Pat
         check=False,
     )
     assert launched.returncode == 0, launched.stderr
-    assert launched.stdout == "launcher:doctor --example\n"
+    assert launched.stdout == f"launcher:1:{command.parent}:doctor --example\n"
+
+
+def test_installed_wrapper_marks_invocation_for_update_checks() -> None:
+    installer = (ROOT / "distribution" / "macos" / "install.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "export SYNCTIFY_INSTALLED=1" in installer
+    assert 'export SYNCTIFY_BIN_DIR="$BIN_DIR"' in installer
 
 
 def test_bundle_readme_explains_state_and_external_tool_boundaries() -> None:
@@ -136,6 +145,8 @@ def test_bundle_readme_explains_state_and_external_tool_boundaries() -> None:
     assert "./synctify.sh" in text
     assert "./synctify.sh install" in text
     assert "~/.local/bin/synctify" in text
+    assert "synctify self-update" in text
+    assert "Update now?" in text
     assert "Python 3.12 or newer" in text
     assert "not bundled with Synctify" in text
     assert "database, configuration, canonical music library, and playlists are NOT stored" in text

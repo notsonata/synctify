@@ -56,6 +56,7 @@ jobs:
           .venv-smoke/bin/python -m pip install dist/synctify-*.whl
           .venv-smoke/bin/synctify --help
           .venv-smoke/bin/synctify tui --help
+          .venv-smoke/bin/synctify self-update --help
           VERSION="$VERSION" .venv-smoke/bin/python -c 'import os, synctify; assert synctify.__version__ == os.environ["VERSION"]'
       - name: Build macOS distribution bundle
         run: python scripts/build_distribution.py --dist-dir dist
@@ -70,6 +71,7 @@ jobs:
           test -x ".dist-smoke/${BUNDLE}/install.sh"
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-smoke/${BUNDLE}/synctify.sh" --help
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-smoke/${BUNDLE}/synctify.sh" tui --help
+          SYNCTIFY_PYTHON="$(command -v python)" ".dist-smoke/${BUNDLE}/synctify.sh" self-update --help
           HOME="$PWD/.dist-home" \
             SHELL="/bin/zsh" \
             SYNCTIFY_PROFILE="$PWD/.dist-home/.zprofile" \
@@ -79,3 +81,6 @@ jobs:
           HOME="$PWD/.dist-home" \
             SYNCTIFY_PYTHON="$(command -v python)" \
             ".dist-home/.local/bin/synctify" --help
+          HOME="$PWD/.dist-home" \
+            SYNCTIFY_PYTHON="$(command -v python)" \
+            ".dist-home/.local/bin/synctify" self-update --help

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import sys
+
 import typer
 
+from . import __version__
 # Import command callables only. These modules still expose their historical Typer
 # apps for compatibility, but the installed CLI below does not reuse those mutable
 # app objects or depend on their decorator/import order.
@@ -20,6 +25,7 @@ from .cli import (
     targets_remove,
 )
 from .cli_entry import audit_command, clean_command
+from .config import Settings
 from .db import connect
 from .entrypoint import (
     config_set,
@@ -40,7 +46,16 @@ from .migration_cli import migrate_command
 from .portable_cli import export_command, import_command
 from .relink_cli import relink_command
 from .resolution import set_manual_override
+from .self_update import (
+    UpdateError,
+    github_client,
+    install_release,
+    resolve_github_token,
+    run_automatic_update,
+)
+from .self_update_cli import self_update_command
 from .setup_cli import setup_command
+from .user_config import UserConfigError, load_user_config, resolve_auto_update
 
 
 app = typer.Typer(
@@ -64,6 +79,89 @@ app.add_typer(streamrip_app, name="streamrip")
 app.add_typer(playlists_app, name="playlists")
 app.add_typer(targets_app, name="targets")
 app.add_typer(config_app, name="config")
+
+
+def _interactive_terminal() -> bool:
+    return bool(
+        getattr(sys.stdin, "isatty", lambda: False)()
+        and getattr(sys.stderr, "isatty", lambda: False)()
+    )
+
+
+def _restart_under_installed_release(version: str) -> None:
+    bin_dir = Path(os.getenv("SYNCTIFY_BIN_DIR", str(Path.home() / ".local" / "bin")))
+    command = bin_dir / "synctify"
+    if not command.is_file():
+        typer.echo(
+            f"Synctify updated to {version}. Re-run your command to use the new version.",
+            err=True,
+        )
+        return
+
+    environment = os.environ.copy()
+    environment["SYNCTIFY_SKIP_AUTO_UPDATE"] = "1"
+    os.execve(str(command), [str(command), *sys.argv[1:]], environment)
+
+
+@app.callback()
+def automatic_update_callback(ctx: typer.Context) -> None:
+    """Check the latest release before every installed Synctify invocation."""
+    if ctx.invoked_subcommand == "self-update":
+        return
+    if os.getenv("SYNCTIFY_INSTALLED") != "1" or os.getenv("SYNCTIFY_SKIP_AUTO_UPDATE") == "1":
+        return
+
+    try:
+        settings = Settings.default()
+        config = load_user_config(settings.home)
+        mode = resolve_auto_update(config)
+    except (OSError, UserConfigError):
+        # Background update checks must never make unrelated commands unusable.
+        return
+
+    result = run_automatic_update(mode, __version__)
+    if result.error:
+        if _interactive_terminal() or mode == "install":
+            typer.echo(f"Synctify update check failed: {result.error}", err=True)
+        return
+    if result.release is None:
+        return
+
+    release = result.release
+    if result.installed:
+        typer.echo(
+            f"Synctify updated automatically: {__version__} -> {release.version}.",
+            err=True,
+        )
+        _restart_under_installed_release(release.version)
+        return
+
+    if mode == "check" or not _interactive_terminal():
+        typer.echo(
+            f"Synctify {release.version} is available (current: {__version__}). "
+            "Run `synctify self-update` to install it.",
+            err=True,
+        )
+        return
+
+    if mode != "prompt":
+        return
+    if not typer.confirm(
+        f"Synctify {release.version} is available (current: {__version__}). Update now?",
+        default=True,
+    ):
+        return
+
+    token = resolve_github_token()
+    try:
+        with github_client(token) as client:
+            install_release(release, client)
+    except UpdateError as exc:
+        typer.echo(f"Synctify update failed: {exc}", err=True)
+        return
+
+    typer.echo(f"Synctify updated: {__version__} -> {release.version}.", err=True)
+    _restart_under_installed_release(release.version)
 
 
 @resolve_app.command("set")
@@ -118,6 +216,7 @@ app.command("export")(export_command)
 app.command("import")(import_command)
 app.command("relink")(relink_command)
 app.command("migrate")(migrate_command)
+app.command("self-update")(self_update_command)
 
 # Spotify commands.
 spotify_app.command("login")(spotify_login)

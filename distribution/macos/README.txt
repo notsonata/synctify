@@ -33,7 +33,39 @@ The stable command can run every normal CLI command, for example:
    synctify update --dry-run
    synctify update
 
-The extracted bundle can still be used portably without installation:
+Installed Synctify checks for a newer stable release every time `synctify` is
+run. When a newer release is available in an interactive Terminal, the default
+behavior is:
+
+   Synctify 1.0.6 is available (current: 1.0.5). Update now? [Y/n]
+
+Answering yes downloads the matching macOS release bundle, validates it,
+installs it into a new versioned app directory, switches app/current, and
+restarts the command under the new version. Non-interactive scripts are never
+blocked for input; they receive an update notice and continue.
+
+Check or update explicitly at any time:
+
+   synctify self-update --check
+   synctify self-update
+
+Update policy can be changed with:
+
+   synctify config set auto-update prompt
+   synctify config set auto-update check
+   synctify config set auto-update install
+   synctify config set auto-update off
+
+`prompt` is the default. `check` only prints a notice, `install` updates without
+asking, and `off` disables automatic checks. SYNCTIFY_AUTO_UPDATE can override
+the saved value.
+
+This repository may require GitHub authentication to read release assets. If it
+is private, authenticate GitHub CLI with `gh auth login` or set
+SYNCTIFY_GITHUB_TOKEN (GH_TOKEN and GITHUB_TOKEN are also recognized).
+
+The extracted bundle can still be used portably without installation. Portable
+runs do not perform automatic update checks:
 
    ./synctify.sh
    ./synctify.sh doctor
@@ -74,9 +106,10 @@ It switches this stable pointer to the installed release:
 
    ~/Library/Application Support/Synctify/app/current
 
-The ~/.local/bin/synctify wrapper always launches app/current/synctify.sh. This
-keeps the command path stable across future releases and gives a self-updater a
-safe versioned location to install before switching `current`.
+The ~/.local/bin/synctify wrapper always launches app/current/synctify.sh and
+marks the process as an installed invocation. This keeps the command path stable
+across releases and lets the updater install a complete version before switching
+`current`.
 
 Each installed release creates and reuses its own private .venv when first run.
 Set SYNCTIFY_PYTHON to an explicit Python interpreter if you do not want the

@@ -10,6 +10,7 @@ _LEGACY_SOURCE_PRIORITY = (*DEFAULT_SOURCE_PRIORITY, "soundcloud")
 QOBUZ_QUALITIES = frozenset({6, 7, 27})
 _LEGACY_QOBUZ_QUALITIES = frozenset({5, 6, 7, 27})
 STREAMRIP_QUALITIES = frozenset({0, 1, 2, 3, 4})
+AUTO_UPDATE_MODES = frozenset({"off", "check", "prompt", "install"})
 
 
 class UserConfigError(ValueError):
@@ -32,6 +33,9 @@ class UserConfig:
     # None keeps the library relative to SYNCTIFY_HOME. Explicit values are
     # stored as absolute paths so runtime behavior never depends on cwd.
     library_dir: str | None = None
+    # prompt: check every installed invocation and ask before installing;
+    # check: notify only; install: update automatically; off: never check.
+    auto_update: str = "prompt"
 
     def streamrip_quality_for(self, source: str) -> int:
         values = {
@@ -98,6 +102,16 @@ def _library_dir(value: object) -> str:
     return str(path)
 
 
+def _auto_update(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise UserConfigError("auto_update cannot be empty")
+    mode = value.strip().lower()
+    if mode not in AUTO_UPDATE_MODES:
+        choices = ", ".join(sorted(AUTO_UPDATE_MODES))
+        raise UserConfigError(f"auto_update must be one of: {choices}")
+    return mode
+
+
 def validate_value(key: str, value: object) -> object:
     """Parse stored/portable values, including legacy lossy settings."""
     if key == "source_priority":
@@ -108,6 +122,8 @@ def validate_value(key: str, value: object) -> object:
         return value.strip()
     if key == "library_dir":
         return _library_dir(value)
+    if key == "auto_update":
+        return _auto_update(value)
     if key == "qobuz_quality":
         return _quality(value, _LEGACY_QOBUZ_QUALITIES, key)
     if key.startswith("streamrip_") and key.endswith("_quality"):
@@ -218,6 +234,11 @@ def resolve_rclone(config: UserConfig, cli_value: str | None = None) -> str:
     return cli_value or os.getenv("SYNCTIFY_RCLONE") or config.rclone
 
 
+def resolve_auto_update(config: UserConfig, cli_value: str | None = None) -> str:
+    raw = cli_value or os.getenv("SYNCTIFY_AUTO_UPDATE") or config.auto_update
+    return _auto_update(raw)
+
+
 def resolve_library_dir(
     config: UserConfig,
     home: Path,
@@ -267,4 +288,5 @@ def effective_user_config(config: UserConfig) -> UserConfig:
         streamrip_deezer_quality=resolve_streamrip_quality(config, "deezer"),
         streamrip_soundcloud_quality=resolve_streamrip_quality(config, "soundcloud"),
         library_dir=_library_dir(library_override) if library_override else config.library_dir,
+        auto_update=resolve_auto_update(config),
     )
