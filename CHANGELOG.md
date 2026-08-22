@@ -2,7 +2,7 @@
 
 ## 1.0.0 - 2026-08-22
 
-Synctify 1.0.0 is the first stable release of the canonical lossless-library workflow, incorporating the correctness, migration, performance, source-policy, and CLI architecture work completed during the pre-1.0 development series.
+Synctify 1.0.0 is the first stable release of the canonical lossless-library workflow, incorporating the correctness, migration, performance, source-policy, CLI architecture, and interactive TUI work completed during the pre-1.0 development series.
 
 ### Safety and correctness
 
@@ -46,9 +46,18 @@ Synctify 1.0.0 is the first stable release of the canonical lossless-library wor
 - lock top-level and nested command names with regression tests
 - retain legacy command modules as internal compatibility surfaces
 
+### Interactive TUI
+
+- add `synctify tui` using Textual as an interactive frontend while preserving the normal CLI
+- show dashboard counts for desired/local/unresolved tracks, resolutions, pending downloads, playlists, targets, and Spotify pull state
+- add unresolved-track review with manual Qobuz/Tidal/Deezer mapping through the core resolution layer
+- expose Doctor and read-only Audit reports in tabular views
+- keep long Doctor/Audit work off the UI thread with managed Textual workers
+- keep TUI launch read-only with respect to initialization and schema migration
+
 ### Documentation and release validation
 
 - rewrite the README around the current supported lossless workflow
 - remove stale SoundCloud setup/acquisition guidance
-- document configuration precedence, migration, relinking, audit, mirrors, backups, and the explicit CLI composition model
+- document configuration precedence, migration, relinking, audit, mirrors, backups, the TUI, and the explicit CLI composition model
 - validate the built wheel on macOS with Python 3.12, 3.13, and 3.14 before release

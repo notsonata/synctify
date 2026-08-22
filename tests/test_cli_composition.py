@@ -25,11 +25,12 @@ def _command_tree(group: Any) -> dict[str, object]:
     return tree
 
 
-def test_explicit_app_preserves_legacy_command_surface() -> None:
-    explicit = typer.main.get_command(app)
-    legacy = typer.main.get_command(legacy_app)
+def test_explicit_app_preserves_legacy_command_surface_plus_tui() -> None:
+    explicit = _command_tree(typer.main.get_command(app))
+    legacy = _command_tree(typer.main.get_command(legacy_app))
 
-    assert _command_tree(explicit) == _command_tree(legacy)
+    assert explicit.pop("tui") is None
+    assert explicit == legacy
 
 
 def test_explicit_app_has_expected_top_level_and_nested_commands() -> None:
@@ -57,6 +58,7 @@ def test_explicit_app_has_expected_top_level_and_nested_commands() -> None:
         "streamrip",
         "sync",
         "targets",
+        "tui",
         "update",
     }
 
@@ -76,6 +78,7 @@ def test_explicit_app_has_expected_top_level_and_nested_commands() -> None:
 def test_all_help_paths_render_from_explicit_app() -> None:
     runner = CliRunner()
     assert runner.invoke(app, ["--help"]).exit_code == 0
+    assert runner.invoke(app, ["tui", "--help"]).exit_code == 0
     for group in ("spotify", "resolve", "qobuz", "streamrip", "playlists", "targets", "config"):
         result = runner.invoke(app, [group, "--help"])
         assert result.exit_code == 0, result.output

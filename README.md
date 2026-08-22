@@ -46,6 +46,26 @@ synctify setup
 
 Set `SYNCTIFY_HOME` to override the default application-data directory.
 
+## Interactive TUI
+
+Launch the terminal user interface with:
+
+```bash
+synctify tui
+```
+
+The 1.0 TUI is an interactive frontend over Synctify's existing local state and service functions. It includes:
+
+- a dashboard for track, local-FLAC, resolution, pending-download, playlist, target, and Spotify-pull state
+- an unresolved-track table with manual Qobuz/Tidal/Deezer mapping
+- Doctor results with pass/warn/fail checks
+- read-only library Audit results
+- keyboard tab navigation (`1`–`4`), `r` to refresh, and `q` to quit
+
+Launching the TUI does not initialize or migrate an absent/older database. Doctor and Audit are run in background workers so their filesystem/tool checks do not block the interface.
+
+The normal CLI remains fully supported and is still the automation interface. In 1.0, coordinated update/acquisition, sync/backup, migration, setup, and repair operations remain CLI commands rather than being duplicated inside the TUI.
+
 ## Source policy
 
 The canonical library is lossless-only. Automatic fallback uses:

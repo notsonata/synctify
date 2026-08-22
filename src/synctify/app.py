@@ -95,6 +95,14 @@ def resolve_set_command(
     typer.echo(f"Mapped {spotify_id} -> {normalized_provider}:{provider_track_id}")
 
 
+@app.command("tui")
+def tui_command() -> None:
+    """Launch the interactive terminal user interface."""
+    from .tui import run_tui
+
+    run_tui()
+
+
 # Core top-level commands.
 app.command("init")(init)
 app.command("status")(configured_status)
