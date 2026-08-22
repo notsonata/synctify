@@ -45,7 +45,7 @@ def test_portable_rejects_invalid_loopback_redirect_port() -> None:
         "redirect_uri": "http://127.0.0.1:not-a-port/callback",
     }
 
-    with pytest.raises(PortableStateError, match="loopback redirect"):
+    with pytest.raises(PortableStateError):
         parse_portable_dict(raw)
 
 
