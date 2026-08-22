@@ -6,14 +6,17 @@ Quick start
 
 1. Extract the release ZIP.
 2. In Terminal, enter the extracted Synctify folder.
-3. Run:
+3. Run first-time setup:
+
+   ./synctify.sh setup
+
+4. Launch the interactive TUI:
 
    ./synctify.sh
 
-With no arguments, synctify.sh launches the interactive TUI.
+With no arguments, synctify.sh launches the TUI.
 You can also use every normal CLI command through the same launcher, for example:
 
-   ./synctify.sh setup
    ./synctify.sh doctor
    ./synctify.sh update --dry-run
    ./synctify.sh update
@@ -52,8 +55,6 @@ Deleting or replacing this extracted release folder therefore does not delete yo
 Checksums
 ---------
 
-The GitHub Release also includes SHA256SUMS. You can verify the downloaded ZIP from Terminal with:
+The GitHub Release also includes SHA256SUMS. To verify only the downloaded macOS ZIP, place the ZIP and SHA256SUMS in the same directory and run:
 
-   shasum -a 256 -c SHA256SUMS
-
-That command expects SHA256SUMS and the downloaded release assets to be in the same directory.
+   grep -- '-macos.zip$' SHA256SUMS | shasum -a 256 -c -
