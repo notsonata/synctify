@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.23.0**
+**Current version: 1.0.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines the desired playlist/library state; Synctify resolves those tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and can keep a non-destructive cloud backup.
 
