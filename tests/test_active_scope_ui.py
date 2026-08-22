@@ -4,6 +4,7 @@ from pathlib import Path
 
 from synctify.config import Settings
 from synctify.db import connect, initialize
+from synctify.library_update import _playlist_scoped_progress
 from synctify.tui_backend import read_dashboard
 
 
@@ -84,3 +85,26 @@ def test_dashboard_resolution_count_excludes_legacy_unreferenced_rows(tmp_path: 
     assert state.tracks == 1
     assert state.resolutions == 1
     assert state.pending_downloads == 1
+
+
+def test_resolution_progress_names_active_owning_playlist(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    initialize(settings.database_path)
+    messages: list[str] = []
+    with connect(settings.database_path) as connection:
+        connection.execute(
+            "INSERT INTO playlists(spotify_id, name) VALUES ('playlist-1', 'Liked Songs')"
+        )
+        connection.execute(
+            "INSERT INTO tracks(spotify_id, title, artist, status) VALUES ('track-1', 'Trouble', 'Cage The Elephant', 'unresolved')"
+        )
+        connection.execute(
+            "INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES ('playlist-1', 'track-1', 0)"
+        )
+        reporter = _playlist_scoped_progress(connection, messages.append)
+        assert reporter is not None
+        reporter("Resolving via deezer [1/1] Cage The Elephant - Trouble")
+
+    assert messages == [
+        "Resolving via deezer [1/1] Liked Songs · Cage The Elephant - Trouble"
+    ]
