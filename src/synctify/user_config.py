@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 DEFAULT_SOURCE_PRIORITY = ("qobuz", "tidal", "deezer", "soundcloud")
-QOBUZ_QUALITIES = frozenset({6, 7, 27})
+QOBUZ_QUALITIES = frozenset({5, 6, 7, 27})
 STREAMRIP_QUALITIES = frozenset({0, 1, 2, 3, 4})
 
 
