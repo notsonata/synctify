@@ -245,11 +245,23 @@ def run_cli_command(
         env=environment,
     )
     if process.stdout is None:
+        process.terminate()
+        process.wait()
         raise RuntimeError("failed to capture Synctify command output")
 
-    for raw_line in process.stdout:
-        line = raw_line.rstrip("\r\n")
-        if on_output is not None:
-            on_output(line)
+    try:
+        for raw_line in process.stdout:
+            line = raw_line.rstrip("\r\n")
+            if on_output is not None:
+                on_output(line)
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+        process.wait()
+        raise
+    finally:
+        close = getattr(process.stdout, "close", None)
+        if close is not None:
+            close()
 
     return CommandResult(args=normalized, returncode=process.wait())
