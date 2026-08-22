@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.23.0 - 2026-08-22
+## 1.0.0 - 2026-08-22
 
-Synctify 0.23.0 is a correctness, migration, and maintainability release built around the canonical lossless-library workflow.
+Synctify 1.0.0 is the first stable release of the canonical lossless-library workflow, incorporating the correctness, migration, performance, source-policy, and CLI architecture work completed during the pre-1.0 development series.
 
 ### Safety and correctness
 
@@ -46,8 +46,9 @@ Synctify 0.23.0 is a correctness, migration, and maintainability release built a
 - lock top-level and nested command names with regression tests
 - retain legacy command modules as internal compatibility surfaces
 
-### Documentation
+### Documentation and release validation
 
 - rewrite the README around the current supported lossless workflow
 - remove stale SoundCloud setup/acquisition guidance
 - document configuration precedence, migration, relinking, audit, mirrors, backups, and the explicit CLI composition model
+- validate the built wheel on macOS with Python 3.12, 3.13, and 3.14 before release
