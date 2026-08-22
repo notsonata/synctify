@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.2 - 2026-08-22
+
+Synctify 1.0.2 is the current macOS distribution release, carrying forward the 1.0.1 launcher bundle and the release-asset cleanup that followed it.
+
+### Release packaging
+
+- publish `synctify-1.0.2-macos.zip` as the primary end-user download
+- keep the executable `synctify.sh`, matching Synctify wheel, `VERSION`, and setup instructions inside the ZIP
+- publish only the macOS ZIP and `synctify-1.0.2.tar.gz` as authored GitHub Release assets
+- keep the Python wheel bundled inside the macOS ZIP instead of exposing it as a separate public asset
+- distinguish GitHub's automatically generated Source code archives from the end-user launcher bundle in the README
+- align package, runtime, documentation, CI smoke tests, and tag verification on version 1.0.2
+
+No SQLite schema or production workflow behavior changes are included in this patch.
+
 ## 1.0.1 - 2026-08-22
 
 Synctify 1.0.1 adds the first end-user macOS distribution layer on top of the verified Python package release.

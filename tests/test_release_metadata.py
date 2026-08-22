@@ -14,7 +14,7 @@ def test_release_version_is_consistent() -> None:
     version = pyproject["project"]["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert version == "1.0.1"
+    assert version == "1.0.2"
     assert synctify.__version__ == version
     assert f"**Current version: {version}**" in readme
 
@@ -40,9 +40,12 @@ def test_readme_describes_current_automatic_resolution_contract() -> None:
 def test_readme_documents_release_zip_launcher() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "synctify-1.0.1-macos.zip" in readme
+    assert "synctify-1.0.2-macos.zip" in readme
     assert "./synctify.sh" in readme
     assert "private `.venv`" in readme
+    assert "synctify-1.0.2.tar.gz" in readme
+    assert "matching Python wheel is bundled inside the macOS ZIP" in readme
+    assert "The GitHub Release also includes `SHA256SUMS`" not in readme
 
 
 def test_installed_entry_point_uses_explicit_cli_app() -> None:

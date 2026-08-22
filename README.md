@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 1.0.1**
+**Current version: 1.0.2**
 
 Synctify is a local-first macOS music library manager. Spotify defines the desired playlist/library state; Synctify resolves those tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and can keep a non-destructive cloud backup.
 
@@ -39,7 +39,7 @@ Streamrip is required for automatic catalog resolution used by `synctify resolve
 
 ### macOS release ZIP
 
-For normal use, download `synctify-1.0.1-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
+For normal use, download `synctify-1.0.2-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
 
 From Terminal, enter the extracted folder and run:
 
@@ -60,7 +60,7 @@ The first launch finds Python 3.12+, creates a private `.venv` inside the extrac
 
 Synctify's database, configuration, canonical library, and playlists remain in the normal macOS application-data location, not inside the release folder. The bundle and its private `.venv` are disposable. Set `SYNCTIFY_HOME` to override the default application-data directory.
 
-The GitHub Release also includes `SHA256SUMS`, the Python wheel, and the source distribution. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
+The GitHub Release publishes `synctify-1.0.2-macos.zip` and `synctify-1.0.2.tar.gz` as the authored release assets. The matching Python wheel is bundled inside the macOS ZIP rather than published as a separate asset. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
 
 ### Development checkout
 
