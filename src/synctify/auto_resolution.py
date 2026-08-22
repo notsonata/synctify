@@ -76,18 +76,21 @@ def pending_resolution_tracks(
     limit: int | None = None,
     spotify_ids: Sequence[str] | None = None,
 ) -> tuple[Track, ...]:
-    params: list[object] = []
-    selected_clause = ""
+    """Return unresolved desired tracks without parameter-per-ID SQL filtering.
+
+    Fallback freezes an initial Spotify-ID set and may pass thousands of IDs back
+    through this function for later sources. Filtering that set in Python avoids
+    SQLite's connection-specific variable limit while preserving database order.
+    """
+    selected_ids: set[str] | None = None
     if spotify_ids is not None:
         selected = tuple(dict.fromkeys(spotify_ids))
         if not selected:
             return ()
-        placeholders = ", ".join("?" for _ in selected)
-        selected_clause = f" AND t.spotify_id IN ({placeholders})"
-        params.extend(selected)
+        selected_ids = set(selected)
 
     rows = connection.execute(
-        f"""
+        """
         SELECT t.spotify_id, t.title, t.artist, t.album, t.isrc, t.duration_ms, t.local_path
         FROM tracks AS t
         WHERE NOT EXISTS (
@@ -100,10 +103,8 @@ def pending_resolution_tracks(
               FROM playlist_tracks AS pt
               WHERE pt.track_id = t.spotify_id
           )
-          {selected_clause}
         ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.title COLLATE NOCASE
-        """,
-        params,
+        """
     ).fetchall()
     tracks = tuple(
         Track(
@@ -116,6 +117,7 @@ def pending_resolution_tracks(
             local_path=None if not row["local_path"] else Path(row["local_path"]),
         )
         for row in rows
+        if selected_ids is None or row["spotify_id"] in selected_ids
     )
     return tracks if limit is None else tracks[:limit]
 
