@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Callable, TypeVar
 
 import typer
 
@@ -33,6 +34,7 @@ from .spotify.client import SpotifyAPIError
 from .user_config import (
     UserConfig,
     UserConfigError,
+    effective_user_config,
     format_user_config,
     load_user_config,
     resolve_qobuz_dl,
@@ -53,6 +55,8 @@ from .workflow import (
 config_app = typer.Typer(help="Inspect and manage persistent Synctify defaults.")
 app.add_typer(config_app, name="config")
 
+T = TypeVar("T")
+
 
 def _settings_and_user_config() -> tuple[Settings, UserConfig]:
     settings = Settings.default()
@@ -64,11 +68,20 @@ def _settings_and_user_config() -> tuple[Settings, UserConfig]:
     return settings, config
 
 
+def _resolve_config_value(factory: Callable[[], T]) -> T:
+    try:
+        return factory()
+    except UserConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+
 @config_app.command("show")
 def config_show() -> None:
-    """Show effective persistent defaults and the config file location."""
+    """Show effective defaults after environment overrides and the config file location."""
     settings, config = _settings_and_user_config()
-    typer.echo(format_user_config(config, settings.home))
+    effective = _resolve_config_value(lambda: effective_user_config(config))
+    typer.echo(format_user_config(effective, settings.home))
 
 
 @config_app.command("set")
@@ -134,10 +147,13 @@ def configured_qobuz_download_url(
 ) -> None:
     """Download a Qobuz URL using configured executable and quality defaults."""
     _, config = _settings_and_user_config()
+    resolved_quality = _resolve_config_value(
+        lambda: resolve_qobuz_quality(config, quality)
+    )
     base_qobuz_download_url(
         url=url,
         destination=destination,
-        quality=resolve_qobuz_quality(config, quality),
+        quality=resolved_quality,
         executable=resolve_qobuz_dl(config, executable),
     )
 
@@ -171,10 +187,20 @@ def configured_acquire(
     )
     selected_quality = quality
     if selected_quality is None:
-        selected_quality = (
-            resolve_qobuz_quality(config)
-            if selected_downloader == "qobuz-dl"
-            else resolve_streamrip_quality(config, normalized_source)
+        selected_quality = _resolve_config_value(
+            lambda: (
+                resolve_qobuz_quality(config)
+                if selected_downloader == "qobuz-dl"
+                else resolve_streamrip_quality(config, normalized_source)
+            )
+        )
+    elif selected_downloader == "qobuz-dl":
+        selected_quality = _resolve_config_value(
+            lambda: resolve_qobuz_quality(config, selected_quality)
+        )
+    else:
+        selected_quality = _resolve_config_value(
+            lambda: resolve_streamrip_quality(config, normalized_source, selected_quality)
         )
     base_acquire(
         source=normalized_source,
@@ -225,7 +251,9 @@ def configured_update(
     settings, config = _settings_and_user_config()
     resolved_streamrip = resolve_streamrip(config, streamrip)
     resolved_qobuz_dl = resolve_qobuz_dl(config, qobuz_dl)
-    configured_sources = resolve_source_priority(config, sources)
+    configured_sources = _resolve_config_value(
+        lambda: resolve_source_priority(config, sources)
+    )
 
     search_provider = StreamripCatalogSearch(
         StreamripSearchConfig(
