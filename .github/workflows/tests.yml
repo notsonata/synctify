@@ -63,9 +63,19 @@ jobs:
         run: |
           VERSION="$(python -c 'import synctify; print(synctify.__version__)')"
           BUNDLE="synctify-${VERSION}-macos"
-          rm -rf .dist-smoke
+          rm -rf .dist-smoke .dist-home
           mkdir .dist-smoke
           unzip -q "dist/${BUNDLE}.zip" -d .dist-smoke
           test -x ".dist-smoke/${BUNDLE}/synctify.sh"
+          test -x ".dist-smoke/${BUNDLE}/install.sh"
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-smoke/${BUNDLE}/synctify.sh" --help
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-smoke/${BUNDLE}/synctify.sh" tui --help
+          HOME="$PWD/.dist-home" \
+            SHELL="/bin/zsh" \
+            SYNCTIFY_PROFILE="$PWD/.dist-home/.zprofile" \
+            ".dist-smoke/${BUNDLE}/synctify.sh" install
+          test -x ".dist-home/.local/bin/synctify"
+          test -L ".dist-home/Library/Application Support/Synctify/app/current"
+          HOME="$PWD/.dist-home" \
+            SYNCTIFY_PYTHON="$(command -v python)" \
+            ".dist-home/.local/bin/synctify" --help
