@@ -49,12 +49,22 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           BUNDLE="synctify-${VERSION}-macos"
-          rm -rf .dist-release
+          rm -rf .dist-release .dist-home
           mkdir .dist-release
           unzip -q "dist/${BUNDLE}.zip" -d .dist-release
           test -x ".dist-release/${BUNDLE}/synctify.sh"
+          test -x ".dist-release/${BUNDLE}/install.sh"
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" --help >/dev/null
           SYNCTIFY_PYTHON="$(command -v python)" ".dist-release/${BUNDLE}/synctify.sh" tui --help >/dev/null
+          HOME="$PWD/.dist-home" \
+            SHELL="/bin/zsh" \
+            SYNCTIFY_PROFILE="$PWD/.dist-home/.zprofile" \
+            ".dist-release/${BUNDLE}/synctify.sh" install >/dev/null
+          test -x ".dist-home/.local/bin/synctify"
+          test -L ".dist-home/Library/Application Support/Synctify/app/current"
+          HOME="$PWD/.dist-home" \
+            SYNCTIFY_PYTHON="$(command -v python)" \
+            ".dist-home/.local/bin/synctify" --help >/dev/null
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
