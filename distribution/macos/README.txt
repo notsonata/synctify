@@ -64,15 +64,24 @@ Library update
 
 `synctify update` works only on playlists/tracks already confirmed in Synctify.
 It does not fetch Spotify playlists or automatically accept new Spotify tracks.
+The Dashboard counts only this active imported desired state; historical rows
+kept for migration/review do not inflate the active track or unresolved totals.
 
-Before any provider lookup, Synctify reuses valid local_path records for approved
-Spotify tracks and scans the canonical FLAC library once for unique safe
-ISRC/metadata matches. Tracks already available locally skip Qobuz/Tidal/Deezer
-resolution and skip downloading. Only still-missing approved tracks proceed to
-provider resolution and acquisition.
+Before any provider lookup, Synctify validates recorded local paths against the
+Spotify track identity. Unrecorded canonical FLACs are auto-adopted only when
+there is one unique exact ISRC match. Automatic Library Update no longer uses
+fuzzy metadata-only local matching. A rejected database association never
+deletes the FLAC; the track simply returns to the missing/resolution queue.
 
-Long operations report their stage to stderr while the final structured report
-remains on stdout. Resolution emits current/total progress and the current track.
+Only still-missing approved tracks proceed to Qobuz/Tidal/Deezer resolution and
+acquisition. Resolver progress includes the owning imported playlist so the
+active scope is visible, for example:
+
+   Resolving via deezer [18/223] Liked Songs · Cage The Elephant - Trouble
+
+If provider lookup leaves some approved tracks unresolved, the update completes
+with an incomplete-playlist warning instead of status 2. Status 2 is reserved
+for actual provider/search/download failures.
 
 Tidal authentication is never started automatically from a Synctify batch. If
 Streamrip's saved Tidal session is missing or expired, Synctify skips Tidal once
@@ -86,11 +95,12 @@ TUI activity and cancellation
 
 Long-running TUI actions show a loading indicator and status message. During
 automatic resolution, the bottom operation strip shows a determinate progress
-bar with source, current/total count, and current track. Starting Library Update
-from the dashboard stays on the current tab instead of forcing Commands open.
-Conflicting buttons are disabled while an action is running. Press Esc or choose
-Cancel (Esc) to cancel an active cancellable operation. The Spotify tab shows
-included, excluded, pending-addition, and pending-removal counts for each playlist.
+bar with source, current/total count, owning playlist, and current track.
+Starting Library Update from the dashboard stays on the current tab instead of
+forcing Commands open. Conflicting buttons are disabled while an action is
+running. Press Esc or choose Cancel (Esc) to cancel an active cancellable
+operation. The Spotify tab shows included, excluded, pending-addition, and
+pending-removal counts for each playlist.
 
 Application upgrades
 --------------------
@@ -103,7 +113,7 @@ Updating the Synctify application is separate from `synctify update`:
 Installed Synctify checks for a newer stable application release according to
 the configured auto-update policy. The default interactive prompt looks like:
 
-   Synctify application 1.2.3 is available (current: 1.2.2). Upgrade now? [Y/n]
+   Synctify application 1.2.4 is available (current: 1.2.3). Upgrade now? [Y/n]
 
 Upgrade policy:
 
@@ -179,10 +189,7 @@ NOT stored in this release folder. They remain in Synctify's normal application
 data locations (or SYNCTIFY_HOME if overridden). Replacing an application
 release therefore does not delete user data.
 
-Synctify 1.2.2 uses database schema v7. When upgrading a schema v6 database,
-previously tracked Spotify playlists are moved back to review state so they
-cannot trigger provider resolution before explicit approval. Previously included
-items become pending additions and exclusions remain excluded. Track rows,
-recorded local FLAC paths/hashes, provider mappings, local audio files, and cloud
-backups are preserved. After approval, those local FLACs are reused before any
-provider download is considered.
+Synctify 1.2.3 keeps database schema v7. No new migration is required. Schema v7
+still keeps previously auto-approved legacy playlists in review state until the
+user explicitly confirms them. Track rows, local audio files, provider mappings,
+and cloud backups remain preserved.
