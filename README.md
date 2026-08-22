@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 0.20.0**
+**Current version: 0.21.0**
 
 Synctify is a local-first macOS music library manager. Spotify defines desired playlist/library state. Synctify resolves those tracks against lossless source services, acquires one canonical local copy, generates UTF-8 M3U8 playlists, mirrors the library to devices, and can maintain a non-destructive cloud backup.
 
@@ -33,6 +33,7 @@ Synctify uses Spotify for metadata and playlist state only. It does not download
 - first-run interactive and scripted setup through `synctify setup`
 - portable setup metadata export/import for migration between Macs
 - migration relink/copy of an existing FLAC library without redownloading matched tracks
+- coordinated migration bootstrap through `synctify migrate`
 - SQLite state database with migrations
 - top-level read-only setup diagnostics through `synctify doctor`
 - persistent defaults for source priority, downloader quality, and executable paths
@@ -159,13 +160,6 @@ synctify import synctify-portable.json --apply
 
 Import merges only the saved config keys present in the bundle, so unrelated machine-local overrides are preserved. Public Spotify configuration is created or replaced as shown in the preview, but no Spotify token is imported. Existing identical targets are reused. A target with the same name but different settings aborts the import before config changes are written.
 
-After migration, authenticate Spotify on the new Mac and verify the setup:
-
-```bash
-synctify spotify login
-synctify doctor
-```
-
 ## Library migration and relink
 
 After importing setup metadata on another Mac, authenticate Spotify and recreate desired playlist/library state before relinking audio:
@@ -202,7 +196,52 @@ Migration behavior:
 - already-local desired tracks are skipped
 - `--limit N` can restrict the number of missing desired tracks inspected in one run
 
-This command does not download audio or change source-service resolutions. After relinking, `synctify audit` and `synctify playlists build` can be used to verify the reconstructed local library.
+This command does not download audio or change source-service resolutions.
+
+## Coordinated migration bootstrap
+
+Use `migrate` when moving Synctify to another Mac and you want the restore stages coordinated for you.
+
+Preview the migration first:
+
+```bash
+synctify migrate synctify-portable.json \
+  --library /Volumes/MusicBackup/MyLibrary
+```
+
+Preview validates the portable bundle, target conflicts, optional library source, and planned stages. It does not create the Synctify home, contact Spotify, copy FLACs, or change SQLite.
+
+Apply the migration explicitly:
+
+```bash
+synctify migrate synctify-portable.json \
+  --library /Volumes/MusicBackup/MyLibrary \
+  --spotify-login \
+  --apply
+```
+
+The apply workflow runs in this order:
+
+1. apply the validated portable setup metadata
+2. optionally launch Spotify browser OAuth when `--spotify-login` is supplied
+3. fetch and apply current Spotify desired state
+4. optionally relink/copy safe FLAC matches from `--library`
+5. rebuild generated playlists
+6. run a read-only library audit
+7. run `doctor`-equivalent final diagnostics
+
+If a valid Spotify token is already present, omit `--spotify-login`. A Spotify login/pull failure stops the later desired-state-dependent stages. Once desired state has been restored, per-track relink failures are retained in the final report and the playlist/audit/doctor stages still run so the remaining migration gaps are visible.
+
+Useful controls:
+
+```bash
+synctify migrate synctify-portable.json --apply
+synctify migrate synctify-portable.json --library /path/to/flacs --apply
+synctify migrate synctify-portable.json --library /path/to/flacs --relink-limit 100 --apply
+synctify migrate synctify-portable.json --library /path/to/flacs --allow-partial --apply
+```
+
+`migrate` does not invoke qobuz-dl or Streamrip. Tracks that are still missing after relink remain available for the normal `resolve` / `acquire` / `update` workflow.
 
 ## Persistent configuration
 
