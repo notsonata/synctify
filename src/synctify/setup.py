@@ -6,7 +6,7 @@ import shutil
 import sqlite3
 from typing import Callable
 
-from .backup import add_rclone_backup_target
+from .backup import add_rclone_backup_target, validate_rclone_backup_target
 from .config import Settings
 from .db import connect, initialize
 from .spotify.auth import DEFAULT_REDIRECT_URI, SpotifyOAuthConfig, resolve_config
@@ -87,12 +87,12 @@ def _apply_config(settings: Settings, options: SetupOptions) -> UserConfig:
 
 
 def _configure_spotify(settings: Settings, options: SetupOptions) -> bool:
-    if options.spotify_client_id is None:
+    if options.spotify_client_id is None and options.spotify_redirect_uri is None:
         return settings.spotify_config_path.exists()
     resolve_config(
         settings.spotify_config_path,
         client_id=options.spotify_client_id,
-        redirect_uri=options.spotify_redirect_uri or DEFAULT_REDIRECT_URI,
+        redirect_uri=options.spotify_redirect_uri,
     )
     return True
 
@@ -117,6 +117,32 @@ def _existing_target(connection: sqlite3.Connection, name: str) -> SyncTarget | 
     )
 
 
+def _validate_target_options(options: SetupOptions) -> None:
+    if (options.mirror_name is None) != (options.mirror_destination is None):
+        raise SetupError("mirror target requires both name and destination")
+    if (options.backup_name is None) != (options.backup_destination is None):
+        raise SetupError("backup target requires both name and destination")
+
+    if options.mirror_name is not None:
+        if not options.mirror_name.strip():
+            raise SetupError("mirror target name cannot be empty")
+
+    if options.backup_name is not None and options.backup_destination is not None:
+        cleaned_name = options.backup_name.strip()
+        if not cleaned_name:
+            raise SetupError("backup target name cannot be empty")
+        candidate = SyncTarget(
+            cleaned_name,
+            options.backup_destination.strip().rstrip("/"),
+            SyncMode.BACKUP,
+            kind="rclone",
+        )
+        try:
+            validate_rclone_backup_target(candidate)
+        except ValueError as exc:
+            raise SetupError(str(exc)) from exc
+
+
 def _ensure_mirror_target(
     connection: sqlite3.Connection,
     name: str,
@@ -125,20 +151,24 @@ def _ensure_mirror_target(
     cleaned = name.strip()
     if not cleaned:
         raise SetupError("mirror target name cannot be empty")
-    requested = str(destination.expanduser())
+    requested = str(destination.expanduser().resolve())
     existing = _existing_target(connection, cleaned)
     if existing is not None:
         if (
             existing.kind == "filesystem"
             and existing.mode is SyncMode.MIRROR
-            and Path(existing.destination).expanduser() == Path(requested).expanduser()
+            and Path(existing.destination).expanduser().resolve()
+            == Path(requested).expanduser().resolve()
         ):
             return SetupTargetResult(cleaned, "mirror", requested, False)
         raise SetupError(
             f"target {cleaned!r} already exists with different settings; "
             "remove it explicitly before replacing it"
         )
-    target = add_filesystem_target(connection, cleaned, destination)
+    try:
+        target = add_filesystem_target(connection, cleaned, destination)
+    except ValueError as exc:
+        raise SetupError(str(exc)) from exc
     return SetupTargetResult(target.name, "mirror", target.destination, True)
 
 
@@ -163,7 +193,10 @@ def _ensure_backup_target(
             f"target {cleaned!r} already exists with different settings; "
             "remove it explicitly before replacing it"
         )
-    target = add_rclone_backup_target(connection, cleaned, requested)
+    try:
+        target = add_rclone_backup_target(connection, cleaned, requested)
+    except ValueError as exc:
+        raise SetupError(str(exc)) from exc
     return SetupTargetResult(target.name, "backup", target.destination, True)
 
 
@@ -171,10 +204,7 @@ def _configure_targets(
     settings: Settings,
     options: SetupOptions,
 ) -> tuple[SetupTargetResult, ...]:
-    if (options.mirror_name is None) != (options.mirror_destination is None):
-        raise SetupError("mirror target requires both name and destination")
-    if (options.backup_name is None) != (options.backup_destination is None):
-        raise SetupError("backup target requires both name and destination")
+    _validate_target_options(options)
 
     results: list[SetupTargetResult] = []
     with connect(settings.database_path) as connection:
@@ -224,6 +254,8 @@ def run_setup(
     which: Which = shutil.which,
 ) -> SetupReport:
     """Initialize Synctify and persist first-run configuration without network access."""
+    # Validate target syntax before creating the home directory, database, or config.
+    _validate_target_options(options)
     settings.ensure_directories()
     initialize(settings.database_path)
     config = _apply_config(settings, options)

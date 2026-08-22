@@ -91,7 +91,7 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
         return checks, ()
 
     try:
-        uri = f"file:{path.resolve().as_posix()}?mode=ro"
+        uri = f"{path.resolve().as_uri()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True)
         connection.row_factory = sqlite3.Row
     except (OSError, sqlite3.DatabaseError) as exc:
@@ -162,34 +162,41 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
         tables = {str(row["name"]) for row in table_rows}
-        core_required = {
+        base_required = {
             "metadata",
             "tracks",
             "playlists",
             "playlist_tracks",
-            "track_resolutions",
             "sync_targets",
             "sync_runs",
-            "playlist_backup_snapshots",
         }
-        missing_core = sorted(core_required - tables)
-        if missing_core:
+        migration_tables = {
+            "track_resolutions",
+            "playlist_backup_snapshots",
+            "generated_playlists",
+        }
+        missing_base = sorted(base_required - tables)
+        missing_migrations = sorted(migration_tables - tables)
+
+        if missing_base:
             checks.append(
                 DoctorCheck(
                     "database",
                     "tables",
                     CheckStatus.FAIL,
-                    f"missing required table(s): {', '.join(missing_core)}",
+                    f"missing required table(s): {', '.join(missing_base)}",
                 )
             )
-        elif "generated_playlists" not in tables:
+        elif missing_migrations:
             if schema_is_older:
                 checks.append(
                     DoctorCheck(
                         "database",
                         "tables",
                         CheckStatus.WARN,
-                        "generated_playlists migration is pending; run `synctify init`",
+                        "migration pending for table(s): "
+                        + ", ".join(missing_migrations)
+                        + "; run `synctify init`",
                     )
                 )
             else:
@@ -198,7 +205,7 @@ def _read_database(path: Path) -> tuple[list[DoctorCheck], tuple[SyncTarget, ...
                         "database",
                         "tables",
                         CheckStatus.FAIL,
-                        "current schema is missing generated_playlists",
+                        "current schema is missing table(s): " + ", ".join(missing_migrations),
                     )
                 )
         else:
