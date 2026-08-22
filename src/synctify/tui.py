@@ -140,6 +140,7 @@ class SynctifyTUI(App[None]):
 
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__()
+        self._settings_explicit = settings is not None
         self.settings = settings or Settings.default()
         self._selected_spotify_id: str | None = None
         self._command_running = False
@@ -210,7 +211,7 @@ class SynctifyTUI(App[None]):
                         id="command-input",
                     )
                     yield Button("Run Command", id="run-command", variant="primary")
-                yield RichLog(id="command-log", wrap=True, markup=True, highlight=True)
+                yield RichLog(id="command-log", wrap=True, markup=False, highlight=True)
 
         yield Static("Ready", id="status-line")
         yield Footer()
@@ -286,6 +287,8 @@ class SynctifyTUI(App[None]):
 
     def refresh_core(self) -> None:
         try:
+            if not self._settings_explicit:
+                self.settings = Settings.default()
             state = read_dashboard(self.settings)
             self._render_dashboard(state)
             self._refresh_unresolved()
@@ -376,7 +379,7 @@ class SynctifyTUI(App[None]):
         self.action_show_tab("commands")
         log = self.query_one("#command-log", RichLog)
         log.clear()
-        log.write(f"[b]$ synctify {shlex.join(args)}[/b]")
+        log.write(f"$ synctify {shlex.join(args)}")
         self._set_status(f"{label} running…")
         self.run_command_worker(args, label)
 
@@ -397,19 +400,19 @@ class SynctifyTUI(App[None]):
 
     def _command_failed(self, label: str, exc: Exception) -> None:
         self._command_running = False
-        self._append_command_output(f"[red]{label} failed: {exc}[/red]")
+        self._append_command_output(f"{label} failed: {exc}")
         self._set_status(f"{label} failed")
         self.notify(str(exc), severity="error", timeout=6)
 
     def _command_finished(self, label: str, result: CommandResult) -> None:
         self._command_running = False
         if result.returncode == 0:
-            self._append_command_output(f"[green]{label} complete.[/green]")
+            self._append_command_output(f"{label} complete.")
             self._set_status(f"{label} complete")
             self.notify(f"{label} complete")
         else:
             self._append_command_output(
-                f"[red]{label} exited with status {result.returncode}.[/red]"
+                f"{label} exited with status {result.returncode}."
             )
             self._set_status(f"{label} failed with status {result.returncode}")
             self.notify(
