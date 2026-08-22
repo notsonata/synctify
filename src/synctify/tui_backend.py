@@ -109,20 +109,56 @@ def read_dashboard(settings: Settings) -> DashboardState:
                 + ", ".join(sorted(required - tables))
             )
 
-        tracks = int(connection.execute("SELECT COUNT(*) FROM tracks").fetchone()[0])
+        # Dashboard library counts describe active desired state only. Historical
+        # track rows are intentionally preserved for review/migration but must not
+        # make the current imported-library scope look larger than it is.
+        tracks = int(
+            connection.execute(
+                "SELECT COUNT(DISTINCT track_id) FROM playlist_tracks"
+            ).fetchone()[0]
+        )
         local_tracks = int(
             connection.execute(
-                "SELECT COUNT(*) FROM tracks WHERE local_path IS NOT NULL AND local_path != ''"
+                """
+                SELECT COUNT(DISTINCT t.spotify_id)
+                FROM tracks AS t
+                JOIN playlist_tracks AS pt ON pt.track_id = t.spotify_id
+                WHERE t.local_path IS NOT NULL AND t.local_path != ''
+                """
             ).fetchone()[0]
+        )
+        unresolved_filter = (
+            """
+            AND NOT EXISTS (
+                SELECT 1 FROM track_resolutions AS r
+                WHERE r.spotify_id = t.spotify_id
+            )
+            """
+            if "track_resolutions" in tables
+            else ""
         )
         unresolved = int(
             connection.execute(
-                "SELECT COUNT(*) FROM tracks WHERE status = 'unresolved'"
+                f"""
+                SELECT COUNT(DISTINCT t.spotify_id)
+                FROM tracks AS t
+                JOIN playlist_tracks AS pt ON pt.track_id = t.spotify_id
+                WHERE (t.local_path IS NULL OR t.local_path = '')
+                {unresolved_filter}
+                """
             ).fetchone()[0]
         )
         playlists = int(connection.execute("SELECT COUNT(*) FROM playlists").fetchone()[0])
         resolutions = (
-            int(connection.execute("SELECT COUNT(*) FROM track_resolutions").fetchone()[0])
+            int(
+                connection.execute(
+                    """
+                    SELECT COUNT(DISTINCT r.spotify_id)
+                    FROM track_resolutions AS r
+                    JOIN playlist_tracks AS pt ON pt.track_id = r.spotify_id
+                    """
+                ).fetchone()[0]
+            )
             if "track_resolutions" in tables
             else 0
         )
