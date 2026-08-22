@@ -10,7 +10,7 @@ _LEGACY_SOURCE_PRIORITY = (*DEFAULT_SOURCE_PRIORITY, "soundcloud")
 QOBUZ_QUALITIES = frozenset({6, 7, 27})
 _LEGACY_QOBUZ_QUALITIES = frozenset({5, 6, 7, 27})
 STREAMRIP_QUALITIES = frozenset({0, 1, 2, 3, 4})
-AUTO_UPDATE_MODES = frozenset({"off", "check", "install"})
+AUTO_UPDATE_MODES = frozenset({"off", "check", "prompt", "install"})
 
 
 class UserConfigError(ValueError):
@@ -33,9 +33,9 @@ class UserConfig:
     # None keeps the library relative to SYNCTIFY_HOME. Explicit values are
     # stored as absolute paths so runtime behavior never depends on cwd.
     library_dir: str | None = None
-    # check: once-daily release check and notice; install: atomically self-update;
-    # off: never perform a background update check.
-    auto_update: str = "check"
+    # prompt: check every installed invocation and ask before installing;
+    # check: notify only; install: update automatically; off: never check.
+    auto_update: str = "prompt"
 
     def streamrip_quality_for(self, source: str) -> int:
         values = {
