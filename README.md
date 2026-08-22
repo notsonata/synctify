@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 1.0.2**
+**Current version: 1.0.3**
 
 Synctify is a local-first macOS music library manager. Spotify defines the desired playlist/library state; Synctify resolves those tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and can keep a non-destructive cloud backup.
 
@@ -39,7 +39,7 @@ Streamrip is required for automatic catalog resolution used by `synctify resolve
 
 ### macOS release ZIP
 
-For normal use, download `synctify-1.0.2-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
+For normal use, download `synctify-1.0.3-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
 
 From Terminal, enter the extracted folder and run:
 
@@ -58,9 +58,9 @@ With no arguments, the launcher opens the Textual TUI. It can also run any norma
 
 The first launch finds Python 3.12+, creates a private `.venv` inside the extracted release folder, and installs the bundled Synctify wheel. Internet access is required during that first bootstrap so pip can install the wheel's Python dependencies. Set `SYNCTIFY_PYTHON` if you want the launcher to use a specific compatible interpreter.
 
-Synctify's database, configuration, canonical library, and playlists remain in the normal macOS application-data location, not inside the release folder. The bundle and its private `.venv` are disposable. Set `SYNCTIFY_HOME` to override the default application-data directory.
+Synctify's database, configuration, canonical library, and playlists remain outside the release folder. The database, configuration, and generated playlists use the normal macOS application-data location. The canonical library uses that location by default but can be pointed at another absolute directory during setup or with `synctify config set library-dir /absolute/path/to/Music`. Set `SYNCTIFY_HOME` to override the application-data directory.
 
-The GitHub Release publishes `synctify-1.0.2-macos.zip` and `synctify-1.0.2.tar.gz` as the authored release assets. The matching Python wheel is bundled inside the macOS ZIP rather than published as a separate asset. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
+The GitHub Release publishes `synctify-1.0.3-macos.zip` and `synctify-1.0.3.tar.gz` as the authored release assets. The matching Python wheel is bundled inside the macOS ZIP rather than published as a separate asset. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
 
 ### Development checkout
 
@@ -121,10 +121,13 @@ Interactive setup:
 synctify setup
 ```
 
+Interactive setup prompts for the canonical music library directory. Press Enter to keep the default, or enter an absolute path to your existing library.
+
 Scripted setup:
 
 ```bash
 synctify setup --non-interactive \
+  --library /absolute/path/to/Music \
   --sources qobuz,tidal,deezer \
   --spotify-client-id YOUR_SPOTIFY_CLIENT_ID \
   --qobuz-dl /path/to/qobuz-dl \
@@ -249,6 +252,7 @@ synctify config show
 Set routine defaults:
 
 ```bash
+synctify config set library-dir /absolute/path/to/Music
 synctify config set source-priority qobuz,tidal,deezer
 synctify config set qobuz-dl /path/to/qobuz-dl
 synctify config set streamrip /opt/homebrew/bin/rip
@@ -257,6 +261,12 @@ synctify config set qobuz-quality 27
 synctify config set streamrip-qobuz-quality 4
 synctify config set streamrip-tidal-quality 3
 synctify config set streamrip-deezer-quality 2
+```
+
+Remove the saved library override to return to the built-in home-relative library:
+
+```bash
+synctify config unset library-dir
 ```
 
 Precedence:
@@ -268,6 +278,7 @@ explicit CLI flag > environment variable > saved config > built-in default
 Main environment overrides:
 
 ```text
+SYNCTIFY_LIBRARY_DIR
 SYNCTIFY_SOURCES
 SYNCTIFY_QOBUZ_DL
 SYNCTIFY_STREAMRIP
@@ -403,4 +414,4 @@ python -m compileall -q src tests
 python -m pytest
 ```
 
-GitHub Actions runs the test suite on macOS across supported Python versions, smoke-tests the built wheel, builds the macOS launcher ZIP, and executes the launcher from the extracted bundle before a release can be tagged.
+Every feature or fix should bump the project version and keep `pyproject.toml`, `synctify.__version__`, README release metadata, and `CHANGELOG.md` synchronized. GitHub Actions runs the test suite on macOS across supported Python versions, smoke-tests the built wheel, builds the macOS launcher ZIP, and executes the launcher from the extracted bundle before a release can be tagged.

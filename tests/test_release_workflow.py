@@ -21,25 +21,25 @@ def _release_module():
 def test_current_stable_release_metadata_is_self_consistent() -> None:
     release = _release_module()
 
-    version, notes = release.verify_release(ROOT, "v1.0.2")
+    version, notes = release.verify_release(ROOT, "v1.0.3")
 
-    assert version == "1.0.2"
-    assert "current macOS distribution release" in notes
-    assert "synctify-1.0.2-macos.zip" in notes
+    assert version == "1.0.3"
+    assert "canonical local FLAC library directory" in notes
+    assert "synctify-1.0.3-macos.zip" in notes
 
 
 def test_mismatched_release_tag_is_rejected() -> None:
     release = _release_module()
 
     with pytest.raises(release.ReleaseValidationError, match="does not match pyproject"):
-        release.verify_release(ROOT, "v1.0.3")
+        release.verify_release(ROOT, "v1.0.4")
 
 
 def test_non_stable_release_tag_is_rejected() -> None:
     release = _release_module()
 
     with pytest.raises(release.ReleaseValidationError, match="stable vX.Y.Z"):
-        release.verify_release(ROOT, "1.0.2")
+        release.verify_release(ROOT, "1.0.3")
 
 
 def test_release_workflow_builds_and_publishes_verified_artifacts() -> None:

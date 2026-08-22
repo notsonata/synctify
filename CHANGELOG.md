@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.3 - 2026-08-22
+
+Synctify 1.0.3 adds first-class configuration for the canonical local FLAC library directory and aligns release metadata for the updated macOS bundle.
+
+### Configurable canonical library
+
+- prompt for the canonical music library directory during interactive setup
+- add `--library` / `--library-dir` to scripted setup
+- add persistent `library-dir` configuration and the `SYNCTIFY_LIBRARY_DIR` environment override
+- make CLI, TUI, audit, acquisition, playlist, and backup runtime paths use the configured canonical library
+- avoid creating the default application-data `library` directory when setup selects a custom location
+- keep changing the canonical path non-destructive: existing files are not moved and existing database `local_path` values are not silently rewritten
+- document changing and unsetting the library override in the macOS bundle and main README
+
+### Release metadata
+
+- publish `synctify-1.0.3-macos.zip` and `synctify-1.0.3.tar.gz` from synchronized package/runtime/documentation metadata
+- document the project rule that feature and fix updates must include a matching version bump and changelog update
+
+No SQLite schema migration is required for this release.
+
 ## 1.0.2 - 2026-08-22
 
 Synctify 1.0.2 is the current macOS distribution release, carrying forward the 1.0.1 launcher bundle and the release-asset cleanup that followed it.
@@ -22,7 +43,7 @@ Synctify 1.0.1 adds the first end-user macOS distribution layer on top of the ve
 ### macOS distribution
 
 - add `synctify-1.0.1-macos.zip` as a first-class GitHub Release asset
-- include an executable `synctify.sh` launcher, the matching Synctify wheel, `VERSION`, and concise setup instructions
+- include an executable `synctify.sh`, the matching Synctify wheel, `VERSION`, and concise setup instructions
 - make `./synctify.sh` create and reuse a private `.venv` inside the extracted release folder
 - launch the Textual TUI when the launcher is run without arguments, while forwarding supplied arguments to the normal CLI
 - auto-detect Python 3.12+ or honor `SYNCTIFY_PYTHON` for an explicit interpreter
