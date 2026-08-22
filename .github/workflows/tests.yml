@@ -31,4 +31,4 @@ jobs:
           python -m venv .venv-smoke
           .venv-smoke/bin/python -m pip install dist/synctify-*.whl
           .venv-smoke/bin/synctify --help
-          .venv-smoke/bin/python -c 'import synctify; assert synctify.__version__ == "0.23.0"'
+          .venv-smoke/bin/python -c 'import synctify; assert synctify.__version__ == "1.0.0"'
