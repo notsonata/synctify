@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 
 from synctify.db import connect, initialize
+from synctify.spotify.cleanup import apply_reviewed_playlist, unimport_reviewed_playlist
 from synctify.spotify.ingest import LIKED_SONGS_ID, PlaylistEntry, SpotifyTrack
 from synctify.spotify.selection import (
     PlaylistCatalogEntry,
     SpotifySelectionCancelled,
-    apply_playlist_choices,
     confirm_playlist,
     fetch_one_playlist,
     fetch_playlist_catalog,
@@ -18,7 +18,6 @@ from synctify.spotify.selection import (
     refresh_playlist_items,
     set_item_choice,
     store_playlist_catalog,
-    unimport_playlist,
 )
 
 
@@ -167,6 +166,10 @@ def test_exclusions_persist_and_new_tracks_stay_pending(tmp_path: Path) -> None:
 
 def test_tracked_removals_are_pending_until_reviewed(tmp_path: Path) -> None:
     database = tmp_path / "synctify.sqlite3"
+    library = tmp_path / "library"
+    playlists_dir = tmp_path / "playlists"
+    library.mkdir()
+    playlists_dir.mkdir()
     initialize(database)
     with connect(database) as connection:
         store_playlist_catalog(connection, "user-1", (_catalog(),))
@@ -188,7 +191,7 @@ def test_tracked_removals_are_pending_until_reviewed(tmp_path: Path) -> None:
         assert [row["track_id"] for row in before] == ["track-1", "track-2"]
 
         set_item_choice(connection, "playlist-1", items["track-1"].item_key, "excluded")
-        apply_playlist_choices(connection, "playlist-1")
+        apply_reviewed_playlist(connection, "playlist-1", library, playlists_dir)
         after = connection.execute(
             "SELECT track_id FROM playlist_tracks WHERE playlist_id = 'playlist-1' ORDER BY position"
         ).fetchall()
@@ -219,13 +222,45 @@ def test_unimport_deletes_flac_only_after_last_playlist_reference(tmp_path: Path
             (str(flac),),
         )
 
-        first = unimport_playlist(connection, "playlist-1", library, playlists_dir)
+        first = unimport_reviewed_playlist(connection, "playlist-1", library, playlists_dir)
         assert flac.exists()
         assert first.cleanup.deleted == ()
 
-        second = unimport_playlist(connection, "playlist-2", library, playlists_dir)
+        second = unimport_reviewed_playlist(connection, "playlist-2", library, playlists_dir)
         assert not flac.exists()
         assert [item.spotify_id for item in second.cleanup.deleted] == ["track-1"]
+
+
+def test_unimport_cleanup_does_not_sweep_unrelated_orphans(tmp_path: Path) -> None:
+    database = tmp_path / "synctify.sqlite3"
+    library = tmp_path / "library"
+    playlists_dir = tmp_path / "playlists"
+    library.mkdir()
+    playlists_dir.mkdir()
+    wanted = library / "Wanted.flac"
+    unrelated = library / "Unrelated.flac"
+    wanted.write_bytes(b"wanted")
+    unrelated.write_bytes(b"unrelated")
+
+    initialize(database)
+    with connect(database) as connection:
+        store_playlist_catalog(connection, "user-1", (_catalog(),))
+        refresh_playlist_items(connection, "playlist-1", (_track("track-1", "Wanted"),))
+        confirm_playlist(connection, "playlist-1")
+        connection.execute(
+            "UPDATE tracks SET local_path = ?, status = 'downloaded' WHERE spotify_id = 'track-1'",
+            (str(wanted),),
+        )
+        connection.execute(
+            "INSERT INTO tracks(spotify_id, title, artist, local_path, status) VALUES ('orphan-1', 'Orphan', 'Artist', ?, 'downloaded')",
+            (str(unrelated),),
+        )
+
+        report = unimport_reviewed_playlist(connection, "playlist-1", library, playlists_dir)
+
+        assert [item.spotify_id for item in report.cleanup.deleted] == ["track-1"]
+        assert not wanted.exists()
+        assert unrelated.exists()
 
 
 def test_schema_migrates_existing_imports_into_tracked_catalog(tmp_path: Path) -> None:
