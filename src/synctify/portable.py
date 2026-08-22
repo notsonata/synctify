@@ -7,10 +7,11 @@ import sqlite3
 from typing import Any
 
 from . import __version__
+from .backup import validate_rclone_backup_target
 from .config import Settings
 from .db import connect, initialize
 from .setup import SetupError, _ensure_backup_target, _ensure_mirror_target
-from .spotify.auth import SpotifyOAuthConfig
+from .spotify.auth import SpotifyAuthError, SpotifyOAuthConfig, _validate_redirect_uri
 from .sync import SyncMode, SyncTarget
 from .user_config import (
     UserConfigError,
@@ -62,15 +63,19 @@ _ALLOWED_TOP_LEVEL = frozenset(
 )
 
 
+def _readonly_db_uri(path: Path) -> str:
+    return f"{path.resolve().as_uri()}?mode=ro"
+
+
 def _read_targets(path: Path) -> tuple[PortableTarget, ...]:
     if not path.exists():
         return ()
     if not path.is_file():
         raise PortableStateError(f"database path is not a file: {path}")
     try:
-        connection = sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True)
+        connection = sqlite3.connect(_readonly_db_uri(path), uri=True)
         connection.row_factory = sqlite3.Row
-    except sqlite3.DatabaseError as exc:
+    except (OSError, sqlite3.DatabaseError) as exc:
         raise PortableStateError(f"could not open Synctify database: {exc}") from exc
     try:
         table = connection.execute(
@@ -199,10 +204,41 @@ def _parse_spotify(raw: object) -> dict[str, str] | None:
     if not isinstance(redirect_uri, str) or not redirect_uri.strip():
         raise PortableStateError("spotify redirect_uri cannot be empty")
     candidate = SpotifyOAuthConfig(client_id.strip(), redirect_uri.strip())
-    # Reuse save/load validation semantics without writing anything.
-    if not candidate.redirect_uri.startswith("http://127.0.0.1:"):
-        raise PortableStateError("Spotify redirect URI must use the 127.0.0.1 loopback host")
+    try:
+        _validate_redirect_uri(candidate.redirect_uri)
+    except (SpotifyAuthError, ValueError) as exc:
+        raise PortableStateError(str(exc)) from exc
     return {"client_id": candidate.client_id, "redirect_uri": candidate.redirect_uri}
+
+
+def _validate_portable_target(target: PortableTarget) -> None:
+    supported = (
+        (target.kind == "filesystem" and target.mode == SyncMode.MIRROR.value)
+        or (target.kind == "rclone" and target.mode == SyncMode.BACKUP.value)
+    )
+    if not supported:
+        raise PortableStateError(
+            f"unsupported portable target {target.name!r}: {target.kind}/{target.mode}"
+        )
+
+    if target.kind == "filesystem":
+        destination = Path(target.destination).expanduser()
+        if not destination.is_absolute():
+            raise PortableStateError(
+                f"filesystem target {target.name!r} destination must be absolute"
+            )
+        return
+
+    candidate = SyncTarget(
+        target.name,
+        target.destination,
+        SyncMode.BACKUP,
+        kind="rclone",
+    )
+    try:
+        validate_rclone_backup_target(candidate)
+    except ValueError as exc:
+        raise PortableStateError(str(exc)) from exc
 
 
 def _parse_target(raw: object) -> PortableTarget:
@@ -220,14 +256,7 @@ def _parse_target(raw: object) -> PortableTarget:
     )
     if not target.name or not target.destination:
         raise PortableStateError("target name and destination cannot be empty")
-    supported = (
-        (target.kind == "filesystem" and target.mode == SyncMode.MIRROR.value)
-        or (target.kind == "rclone" and target.mode == SyncMode.BACKUP.value)
-    )
-    if not supported:
-        raise PortableStateError(
-            f"unsupported portable target {target.name!r}: {target.kind}/{target.mode}"
-        )
+    _validate_portable_target(target)
     return target
 
 
@@ -271,10 +300,9 @@ def read_portable_bundle(path: Path) -> PortableBundle:
 def _existing_targets(settings: Settings) -> dict[str, SyncTarget]:
     if not settings.database_path.exists():
         return {}
+    connection: sqlite3.Connection | None = None
     try:
-        connection = sqlite3.connect(
-            f"file:{settings.database_path.resolve().as_posix()}?mode=ro", uri=True
-        )
+        connection = sqlite3.connect(_readonly_db_uri(settings.database_path), uri=True)
         connection.row_factory = sqlite3.Row
         table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sync_targets'"
@@ -284,13 +312,11 @@ def _existing_targets(settings: Settings) -> dict[str, SyncTarget]:
         rows = connection.execute(
             "SELECT id, name, kind, destination, mode FROM sync_targets"
         ).fetchall()
-    except sqlite3.DatabaseError as exc:
+    except (OSError, sqlite3.DatabaseError) as exc:
         raise PortableStateError(f"could not inspect existing targets: {exc}") from exc
     finally:
-        try:
+        if connection is not None:
             connection.close()
-        except UnboundLocalError:
-            pass
     result: dict[str, SyncTarget] = {}
     for row in rows:
         try:
@@ -325,6 +351,11 @@ def _target_action(target: PortableTarget, existing: SyncTarget | None) -> str:
 
 
 def plan_import(settings: Settings, bundle: PortableBundle) -> ImportPlan:
+    # Validate every target even for programmatically constructed bundles so apply
+    # cannot reach a late target failure after writing config or Spotify state.
+    for target in bundle.targets:
+        _validate_portable_target(target)
+
     existing_targets = _existing_targets(settings)
     target_plans = tuple(
         ImportTargetPlan(target, _target_action(target, existing_targets.get(target.name)))
@@ -356,7 +387,7 @@ def plan_import(settings: Settings, bundle: PortableBundle) -> ImportPlan:
 
 
 def apply_import(settings: Settings, bundle: PortableBundle) -> ImportPlan:
-    # Preflight all conflicts before the first write.
+    # Preflight all validation and conflicts before the first write.
     plan = plan_import(settings, bundle)
 
     settings.ensure_directories()
