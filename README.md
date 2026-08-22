@@ -1,8 +1,8 @@
 # Synctify
 
-**Current version: 1.2.1**
+**Current version: 1.2.2**
 
-Synctify is a local-first macOS music library manager. Spotify supplies playlist metadata and the user's desired selections; Synctify resolves confirmed tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and keeps cloud backups non-destructive.
+Synctify is a local-first macOS music library manager. Spotify supplies playlist metadata and the user's desired selections; Synctify reuses safe existing local FLACs first, resolves only still-missing confirmed tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and keeps cloud backups non-destructive.
 
 ## Architecture
 
@@ -13,6 +13,8 @@ User-reviewed playlists and tracks
         ↓
 Confirmed Synctify desired state
         ↓
+Match against canonical local FLAC library
+        ↓ missing tracks only
 Automatic resolution via Streamrip catalog search
 Qobuz → Tidal → Deezer
         ↓
@@ -43,7 +45,7 @@ Streamrip is required for automatic catalog resolution used by `synctify resolve
 
 ### macOS release ZIP
 
-For normal use, download `synctify-1.2.1-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
+For normal use, download `synctify-1.2.2-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
 
 From Terminal, enter the extracted folder and install the stable command:
 
@@ -54,14 +56,14 @@ From Terminal, enter the extracted folder and install the stable command:
 The installer stores the application under:
 
 ```text
-~/Library/Application Support/Synctify/app/releases/1.2.1
+~/Library/Application Support/Synctify/app/releases/1.2.2
 ```
 
 and points `~/Library/Application Support/Synctify/app/current` at that version. It also creates `~/.local/bin/synctify` and adds `~/.local/bin` to your shell PATH when needed.
 
 The first application launch finds Python 3.12+, creates a private `.venv` inside the active versioned application release, and installs the matching Python wheel bundled inside the macOS ZIP. Internet access is required during that first bootstrap for Python dependencies.
 
-The GitHub Release publishes `synctify-1.2.1-macos.zip` and `synctify-1.2.1.tar.gz` as authored release assets. Streamrip, qobuz-dl, and rclone remain external tools.
+The GitHub Release publishes `synctify-1.2.2-macos.zip` and `synctify-1.2.2.tar.gz` as authored release assets. Streamrip, qobuz-dl, and rclone remain external tools.
 
 After installation:
 
@@ -85,7 +87,7 @@ synctify upgrade
 Installed Synctify checks GitHub for a newer stable application release according to the configured auto-update policy. In the default interactive policy it asks:
 
 ```text
-Synctify application 1.2.2 is available (current: 1.2.1). Upgrade now? [Y/n]
+Synctify application 1.2.3 is available (current: 1.2.2). Upgrade now? [Y/n]
 ```
 
 Update policy:
@@ -101,7 +103,7 @@ synctify config set auto-update off
 
 ## Spotify selection workflow
 
-Synctify 1.2 separates Spotify discovery from the active music library. Fetching Spotify data never automatically downloads music.
+Synctify separates Spotify discovery and review from provider resolution/downloads. Fetching or reviewing Spotify data never contacts Qobuz, Tidal, or Deezer and never starts a music download.
 
 ### 1. Fetch the playlist catalog
 
@@ -115,9 +117,9 @@ In the TUI, open the **Spotify** tab and choose **Fetch Playlists**. The playlis
 
 ### 2. Review one playlist at a time
 
-Select a playlist and choose **Load / Review**. Synctify fetches only that playlist's tracks. For an unimported playlist, tracks start as pending choices. Mark tracks included or excluded, then choose **Confirm Playlist**.
+Select a playlist and choose **Load / Review**. Synctify fetches only that playlist's tracks from Spotify. For an unimported playlist, tracks start as pending choices. Mark tracks included or excluded, then choose **Confirm Playlist**.
 
-After confirming one playlist, return to the playlist list and configure the next playlist. Synctify does not automatically walk every playlist or start a bulk download.
+Confirming a playlist only writes the approved desired state. It does **not** resolve providers and does **not** download songs. After confirming one playlist, return to the playlist list and configure the next playlist.
 
 Track exclusions are persistent. If an excluded Spotify track remains in the playlist on a future refresh, it stays excluded.
 
@@ -136,7 +138,7 @@ The Spotify sidebar shows:
 - pending additions
 - pending removals
 
-Use **Apply Choices** after reviewing an imported playlist. Pending additions do not enter the resolution/download queue until explicitly included and applied.
+Use **Apply Choices** after reviewing an imported playlist. Pending additions do not enter the local-match/resolution/download workflow until explicitly included and applied.
 
 ### Unimporting a playlist
 
@@ -202,11 +204,14 @@ synctify update
 
 The workflow:
 
-1. uses the playlists/tracks already confirmed in Synctify
-2. resolves unresolved confirmed tracks using Streamrip catalog search
-3. acquires resolved tracks
-4. reconciles safely matching existing FLAC files
-5. rebuilds generated playlists
+1. uses only playlists/tracks already confirmed in Synctify
+2. preserves valid recorded FLAC paths for matching Spotify track IDs
+3. scans the canonical library once and safely matches other existing FLACs by ISRC/metadata
+4. resolves only confirmed tracks that still have no usable local FLAC
+5. acquires only still-missing resolved tracks
+6. rebuilds generated playlists
+
+A track with a valid canonical `local_path` never enters automatic provider resolution. An approved track without a recorded path is first compared with the existing FLAC library using the same conservative reconciliation rules used by acquisition. This means files you already have are reused rather than downloaded again.
 
 Useful controls:
 
@@ -429,7 +434,11 @@ Relink copies/adopts only safe one-to-one matches for currently desired tracks. 
 
 ## Database migration
 
-Synctify 1.2 uses schema v6 for the staged Spotify catalog, persistent track exclusions, and pending additions/removals. Normal initialization/setup applies the migration. Existing imported Spotify playlists are seeded into the new catalog as tracked with their existing tracks marked included.
+Synctify 1.2.2 uses schema v7 to enforce review-before-download semantics for databases that passed through the older all-at-once import model.
+
+When upgrading a schema v6 database, Synctify moves previously tracked Spotify playlists back to review state and removes their playlist references from active desired state. Previously included items become pending additions; existing exclusions remain excluded. The migration **does not delete track rows, local FLAC files, recorded local paths/hashes, provider mappings, or cloud backups**.
+
+After the migration, fetch/review the Spotify playlists you want and confirm them. When a confirmed Spotify track already has a valid recorded local FLAC, Synctify reuses it. If the recorded path is missing, Synctify scans the canonical library for a unique safe ISRC/metadata match before contacting any provider.
 
 Run this explicitly if Doctor reports an older schema:
 

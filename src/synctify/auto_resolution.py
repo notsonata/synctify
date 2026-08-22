@@ -99,6 +99,7 @@ def _query_pending_rows(
             FROM track_resolutions AS r
             WHERE r.spotify_id = t.spotify_id
         )
+          AND (t.local_path IS NULL OR t.local_path = '')
           AND EXISTS (
               SELECT 1
               FROM playlist_tracks AS pt
@@ -148,7 +149,7 @@ def pending_resolution_tracks(
     limit: int | None = None,
     spotify_ids: Sequence[str] | None = None,
 ) -> tuple[Track, ...]:
-    """Return unresolved desired tracks with bounded database-side filtering."""
+    """Return confirmed tracks that still need a provider resolution."""
     return tuple(
         _track_from_row(row)
         for row in _query_pending_rows(connection, spotify_ids, limit=limit)

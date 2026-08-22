@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.2 - 2026-08-23
+
+Synctify 1.2.2 restores the intended review-before-download flow for legacy libraries and reuses existing canonical FLACs before any provider lookup.
+
+### Review-before-download migration
+
+- add schema v7 to move playlists previously auto-approved by the v6 migration back into review state
+- convert previously included legacy playlist items to pending additions while preserving explicit exclusions
+- detach those playlists from active desired state so `synctify update` cannot resolve or download them until the user confirms them
+- preserve track rows, recorded local FLAC paths and hashes, provider mappings, generated files, and cloud backups during the migration
+- keep Spotify catalog fetch, playlist loading, track include/exclude review, and playlist confirmation free of Qobuz/Tidal/Deezer access
+
+### Local FLAC reuse
+
+- preserve valid recorded local paths when approved Spotify track IDs already exist in the local database
+- scan the canonical FLAC library once before provider resolution for approved tracks without usable recorded paths
+- reuse only unique safe ISRC/metadata matches using the existing conservative reconciliation rules
+- clear stale recorded paths before fallback resolution
+- exclude tracks with a usable local FLAC from automatic provider resolution and acquisition planning
+- make `synctify update --dry-run` model the same local reuse behavior inside its rollback sandbox
+
+SQLite schema migration **is required** for this release. Schema v7 intentionally requires one explicit review pass for playlists that schema v6 considered tracked; no local FLAC or cloud backup is deleted by the migration.
+
 ## 1.2.1 - 2026-08-23
 
 Synctify 1.2.1 prevents automatic Tidal resolution from spawning repeated login pages and makes long library updates show useful live progress in the TUI.
@@ -80,7 +103,7 @@ Synctify 1.1.1 separates application upgrades from music-library updates so the 
 ### Upgrade command
 
 - replace the public `synctify self-update` command with `synctify upgrade`
-- keep `synctify upgrade --check` for checking the latest stable application release without installing it
+- keep `synctify upgrade --check` for checking the latest stable Synctify application release without installing it
 - reserve `synctify update` for the music-library workflow
 - change automatic release prompts and notices to say `application` and `upgrade` explicitly
 - resume the original command after an accepted automatic application upgrade using the existing installed-wrapper handoff
