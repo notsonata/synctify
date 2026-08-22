@@ -29,6 +29,9 @@ class UserConfig:
     # Kept so existing config/portable files remain readable. SoundCloud itself
     # is not an automatic/acquisition source for Synctify's canonical FLAC library.
     streamrip_soundcloud_quality: int = 2
+    # None keeps the library relative to SYNCTIFY_HOME. Explicit values are
+    # stored as absolute paths so runtime behavior never depends on cwd.
+    library_dir: str | None = None
 
     def streamrip_quality_for(self, source: str) -> int:
         values = {
@@ -86,6 +89,15 @@ def _quality(value: object, allowed: frozenset[int], label: str) -> int:
     return parsed
 
 
+def _library_dir(value: object) -> str:
+    if not isinstance(value, (str, Path)) or not str(value).strip():
+        raise UserConfigError("library_dir cannot be empty")
+    path = Path(str(value).strip()).expanduser()
+    if not path.is_absolute():
+        raise UserConfigError("library_dir must be an absolute path")
+    return str(path)
+
+
 def validate_value(key: str, value: object) -> object:
     """Parse stored/portable values, including legacy lossy settings."""
     if key == "source_priority":
@@ -94,6 +106,8 @@ def validate_value(key: str, value: object) -> object:
         if not isinstance(value, str) or not value.strip():
             raise UserConfigError(f"{key} cannot be empty")
         return value.strip()
+    if key == "library_dir":
+        return _library_dir(value)
     if key == "qobuz_quality":
         return _quality(value, _LEGACY_QOBUZ_QUALITIES, key)
     if key.startswith("streamrip_") and key.endswith("_quality"):
@@ -182,7 +196,12 @@ def unset_user_config(home: Path, key: str) -> tuple[UserConfig, bool]:
 def format_user_config(config: UserConfig, home: Path) -> str:
     lines = [f"Config: {config_path(home)}"]
     for key, value in config.as_dict().items():
-        shown = ",".join(value) if key == "source_priority" else value
+        if key == "source_priority":
+            shown = ",".join(value)
+        elif key == "library_dir":
+            shown = value or str(home / "library")
+        else:
+            shown = value
         lines.append(f"  {key.replace('_', '-')}: {shown}")
     return "\n".join(lines)
 
@@ -197,6 +216,19 @@ def resolve_streamrip(config: UserConfig, cli_value: str | None = None) -> str:
 
 def resolve_rclone(config: UserConfig, cli_value: str | None = None) -> str:
     return cli_value or os.getenv("SYNCTIFY_RCLONE") or config.rclone
+
+
+def resolve_library_dir(
+    config: UserConfig,
+    home: Path,
+    cli_value: str | Path | None = None,
+    *,
+    default: Path | None = None,
+) -> Path:
+    raw = cli_value or os.getenv("SYNCTIFY_LIBRARY_DIR") or config.library_dir
+    if raw is None:
+        return (default or (home / "library")).expanduser()
+    return Path(_library_dir(raw))
 
 
 def resolve_source_priority(config: UserConfig, cli_value: str | None = None) -> tuple[str, ...]:
@@ -223,6 +255,7 @@ def resolve_streamrip_quality(config: UserConfig, source: str, cli_value: int | 
 
 def effective_user_config(config: UserConfig) -> UserConfig:
     """Resolve environment-overridden values using normal runtime precedence."""
+    library_override = os.getenv("SYNCTIFY_LIBRARY_DIR")
     return UserConfig(
         source_priority=resolve_source_priority(config),
         qobuz_dl=resolve_qobuz_dl(config),
@@ -233,4 +266,5 @@ def effective_user_config(config: UserConfig) -> UserConfig:
         streamrip_tidal_quality=resolve_streamrip_quality(config, "tidal"),
         streamrip_deezer_quality=resolve_streamrip_quality(config, "deezer"),
         streamrip_soundcloud_quality=resolve_streamrip_quality(config, "soundcloud"),
+        library_dir=_library_dir(library_override) if library_override else config.library_dir,
     )
