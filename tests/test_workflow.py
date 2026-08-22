@@ -209,7 +209,7 @@ def test_download_failure_is_reported_and_playlist_build_still_runs(tmp_path: Pa
     assert report.playlists.written == 0
 
 
-def test_cli_update_dry_run_uses_coordinated_command_and_leaves_db_unchanged(
+def test_cli_update_dry_run_uses_coordinated_command_without_creating_state(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -228,7 +228,4 @@ def test_cli_update_dry_run_uses_coordinated_command_and_leaves_db_unchanged(
     assert result.exit_code == 0, result.output
     assert "Acquisition" in result.output
     assert "Preview only" in result.output
-    with connect(home / "synctify.sqlite3") as connection:
-        assert connection.execute("SELECT COUNT(*) FROM tracks").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM playlists").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM track_resolutions").fetchone()[0] == 0
+    assert not home.exists()
