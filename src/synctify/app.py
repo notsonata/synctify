@@ -6,10 +6,10 @@ import typer
 # apps for compatibility, but the installed CLI below does not reuse those mutable
 # app objects or depend on their decorator/import order.
 from .cli import (
+    _settings_with_database,
     init,
     playlists_build,
     resolve_clear,
-    resolve_set,
     resolve_status,
     spotify_login,
     spotify_logout,
@@ -20,6 +20,7 @@ from .cli import (
     targets_remove,
 )
 from .cli_entry import audit_command, clean_command
+from .db import connect
 from .entrypoint import (
     config_set,
     config_show,
@@ -38,6 +39,7 @@ from .entrypoint import (
 from .migration_cli import migrate_command
 from .portable_cli import export_command, import_command
 from .relink_cli import relink_command
+from .resolution import set_manual_override
 from .setup_cli import setup_command
 
 
@@ -63,6 +65,36 @@ app.add_typer(playlists_app, name="playlists")
 app.add_typer(targets_app, name="targets")
 app.add_typer(config_app, name="config")
 
+
+@resolve_app.command("set")
+def resolve_set_command(
+    spotify_id: str,
+    provider: str = typer.Argument(
+        ...,
+        help="Source provider: qobuz, tidal, or deezer.",
+    ),
+    provider_track_id: str = typer.Argument(..., help="Provider track identifier."),
+) -> None:
+    """Persist a manual source-service mapping for one Spotify track."""
+    settings = _settings_with_database()
+    normalized_provider = provider.strip().lower()
+    try:
+        with connect(settings.database_path) as connection:
+            set_manual_override(
+                connection,
+                spotify_id,
+                normalized_provider,
+                provider_track_id,
+            )
+    except KeyError as exc:
+        typer.echo(f"Unknown Spotify track: {spotify_id}", err=True)
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(f"Mapped {spotify_id} -> {normalized_provider}:{provider_track_id}")
+
+
 # Core top-level commands.
 app.command("init")(init)
 app.command("status")(configured_status)
@@ -84,10 +116,9 @@ spotify_app.command("login")(spotify_login)
 spotify_app.command("logout")(spotify_logout)
 spotify_app.command("pull")(spotify_pull)
 
-# Resolution commands. Use the configured automatic resolver; status/set/clear are
-# the single core implementations.
+# Resolution commands. Use the configured automatic resolver; status/clear are the
+# single core implementations and set has a validation-aware wrapper above.
 resolve_app.command("status")(resolve_status)
-resolve_app.command("set")(resolve_set)
 resolve_app.command("clear")(resolve_clear)
 resolve_app.command("auto")(configured_resolve_auto)
 
