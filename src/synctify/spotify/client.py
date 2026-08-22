@@ -12,7 +12,11 @@ API_BASE = "https://api.spotify.com/v1"
 
 class SpotifyAPIError(RuntimeError):
     def __init__(self, status_code: int, message: str) -> None:
-        super().__init__(f"Spotify API error {status_code}: {message}")
+        if status_code > 0:
+            rendered = f"Spotify API error {status_code}: {message}"
+        else:
+            rendered = f"Spotify request failed: {message}"
+        super().__init__(rendered)
         self.status_code = status_code
         self.message = message
 
@@ -42,7 +46,14 @@ class SpotifyClient:
         while True:
             token = self.auth.access_token(force_refresh=force_refresh)
             force_refresh = False
-            response = self._client.get(url, params=params, headers={"Authorization": f"Bearer {token}"})
+            try:
+                response = self._client.get(
+                    url,
+                    params=params,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            except httpx.RequestError as exc:
+                raise SpotifyAPIError(0, str(exc)) from exc
             params = None
             if response.status_code == 401 and not refreshed:
                 refreshed = True
