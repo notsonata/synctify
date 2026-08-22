@@ -128,6 +128,43 @@ def test_cli_command_runner_uses_existing_app_and_streams_output(
     assert output == ["first line", "second line"]
 
 
+def test_cli_command_runner_terminates_child_when_output_callback_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+
+    class FakeProcess:
+        stdout = iter(["still running\n"])
+        terminated = False
+        waited = False
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def wait(self) -> int:
+            self.waited = True
+            return -15
+
+    process = FakeProcess()
+    monkeypatch.setattr(
+        "synctify.tui_backend.subprocess.Popen",
+        lambda *args, **kwargs: process,
+    )
+
+    def fail_output(_line: str) -> None:
+        raise RuntimeError("UI closed")
+
+    with pytest.raises(RuntimeError, match="UI closed"):
+        run_cli_command(settings, ("update",), on_output=fail_output)
+
+    assert process.terminated
+    assert process.waited
+
+
 def test_cli_command_runner_rejects_nested_tui(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="nested"):
         run_cli_command(_settings(tmp_path), ("tui",))
