@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
 VERSION_FILE="$ROOT_DIR/VERSION"
+INSTALLER="$ROOT_DIR/install.sh"
 
 fail() {
   printf 'synctify: %s\n' "$*" >&2
@@ -12,6 +13,12 @@ fail() {
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   fail "this release bundle targets macOS"
+fi
+
+if [[ "${1:-}" == "install" ]]; then
+  [[ -x "$INSTALLER" ]] || fail "missing executable install.sh next to synctify.sh"
+  shift
+  exec "$INSTALLER" "$@"
 fi
 
 [[ -f "$VERSION_FILE" ]] || fail "missing VERSION file next to synctify.sh"

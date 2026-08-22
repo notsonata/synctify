@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 1.0.3**
+**Current version: 1.0.4**
 
 Synctify is a local-first macOS music library manager. Spotify defines the desired playlist/library state; Synctify resolves those tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and can keep a non-destructive cloud backup.
 
@@ -39,28 +39,61 @@ Streamrip is required for automatic catalog resolution used by `synctify resolve
 
 ### macOS release ZIP
 
-For normal use, download `synctify-1.0.3-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
+For normal use, download `synctify-1.0.4-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
 
-From Terminal, enter the extracted folder and run:
+From Terminal, enter the extracted folder and install the stable command:
+
+```bash
+./synctify.sh install
+```
+
+The installer stores the application under:
+
+```text
+~/Library/Application Support/Synctify/app/releases/1.0.4
+```
+
+and points:
+
+```text
+~/Library/Application Support/Synctify/app/current
+```
+
+at that version. It also creates:
+
+```text
+~/.local/bin/synctify
+```
+
+and adds `~/.local/bin` to your shell PATH when needed. If the installer changes your shell profile, restart Terminal or source the profile path it prints.
+
+After installation, run Synctify from anywhere:
+
+```bash
+synctify setup
+synctify doctor
+synctify update --dry-run
+synctify update
+synctify
+```
+
+With no arguments, `synctify` opens the Textual TUI.
+
+The extracted bundle remains usable in portable mode without installing the stable command:
 
 ```bash
 ./synctify.sh
-```
-
-With no arguments, the launcher opens the Textual TUI. It can also run any normal CLI command:
-
-```bash
 ./synctify.sh setup
 ./synctify.sh doctor
-./synctify.sh update --dry-run
-./synctify.sh update
 ```
 
-The first launch finds Python 3.12+, creates a private `.venv` inside the extracted release folder, and installs the bundled Synctify wheel. Internet access is required during that first bootstrap so pip can install the wheel's Python dependencies. Set `SYNCTIFY_PYTHON` if you want the launcher to use a specific compatible interpreter.
+The first application launch finds Python 3.12+, creates a private `.venv` inside the active versioned application release, and installs the bundled Synctify wheel. Internet access is required during that first bootstrap so pip can install the wheel's Python dependencies. Set `SYNCTIFY_PYTHON` if you want the launcher to use a specific compatible interpreter.
 
-Synctify's database, configuration, canonical library, and playlists remain outside the release folder. The database, configuration, and generated playlists use the normal macOS application-data location. The canonical library uses that location by default but can be pointed at another absolute directory during setup or with `synctify config set library-dir /absolute/path/to/Music`. Set `SYNCTIFY_HOME` to override the application-data directory.
+The stable `~/.local/bin/synctify` wrapper always launches `app/current/synctify.sh`. New releases can therefore be installed into a new versioned directory before `current` is switched, which provides the filesystem layout needed for a future atomic self-update command.
 
-The GitHub Release publishes `synctify-1.0.3-macos.zip` and `synctify-1.0.3.tar.gz` as the authored release assets. The matching Python wheel is bundled inside the macOS ZIP rather than published as a separate asset. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
+Synctify's database, configuration, canonical library, and playlists remain separate from the replaceable application release. The database, configuration, and generated playlists use the normal macOS application-data location. The canonical library uses that location by default but can be pointed at another absolute directory during setup or with `synctify config set library-dir /absolute/path/to/Music`. Set `SYNCTIFY_HOME` to override the application-data directory.
+
+The GitHub Release publishes `synctify-1.0.4-macos.zip` and `synctify-1.0.4.tar.gz` as the authored release assets. The matching Python wheel is bundled inside the macOS ZIP rather than published as a separate asset. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
 
 ### Development checkout
 
@@ -78,10 +111,16 @@ synctify setup
 Launch the terminal user interface with:
 
 ```bash
+synctify
+```
+
+The explicit CLI form remains available:
+
+```bash
 synctify tui
 ```
 
-When using the release ZIP, the equivalent command is simply:
+When using an extracted release ZIP without installing it, use:
 
 ```bash
 ./synctify.sh
@@ -414,4 +453,4 @@ python -m compileall -q src tests
 python -m pytest
 ```
 
-Every feature or fix should bump the project version and keep `pyproject.toml`, `synctify.__version__`, README release metadata, and `CHANGELOG.md` synchronized. GitHub Actions runs the test suite on macOS across supported Python versions, smoke-tests the built wheel, builds the macOS launcher ZIP, and executes the launcher from the extracted bundle before a release can be tagged.
+Every feature or fix should bump the project version and keep `pyproject.toml`, `synctify.__version__`, README release metadata, and `CHANGELOG.md` synchronized. GitHub Actions runs the test suite on macOS across supported Python versions, smoke-tests the built wheel, builds the macOS launcher ZIP, verifies the stable installer command, and executes the launcher from the extracted bundle before a release can be tagged.
