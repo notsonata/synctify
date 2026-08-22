@@ -10,6 +10,10 @@ Quick start
 
    ./synctify.sh setup
 
+   Setup prompts for the canonical music library directory. Press Enter to use
+   the normal Synctify application-data library, or enter an absolute path to
+   an existing/local FLAC library.
+
 4. Launch the interactive TUI:
 
    ./synctify.sh
@@ -20,6 +24,14 @@ You can also use every normal CLI command through the same launcher, for example
    ./synctify.sh doctor
    ./synctify.sh update --dry-run
    ./synctify.sh update
+
+To change the canonical library later:
+
+   ./synctify.sh config set library-dir /absolute/path/to/Music
+
+Remove that override to return to the built-in location:
+
+   ./synctify.sh config unset library-dir
 
 If macOS or your unzip tool removed the executable bit, run this once:
 
@@ -48,7 +60,7 @@ Set SYNCTIFY_PYTHON to an explicit Python interpreter if you do not want the lau
 Your data
 ---------
 
-Synctify's database, configuration, canonical music library, and playlists are NOT stored in this release folder. They continue to live in Synctify's normal macOS application-data directory (or SYNCTIFY_HOME if you set it).
+Synctify's database, configuration, and generated playlists are NOT stored in this release folder. They continue to live in Synctify's normal macOS application-data directory (or SYNCTIFY_HOME if you set it). The canonical music library uses that location by default, but can be pointed at another absolute directory during setup, with `config set library-dir`, or via SYNCTIFY_LIBRARY_DIR.
 
 Deleting or replacing this extracted release folder therefore does not delete your Synctify state or music library. The .venv inside the release folder is disposable.
 
