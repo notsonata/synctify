@@ -215,7 +215,7 @@ def save_resolution(connection: sqlite3.Connection, spotify_id: str, resolution:
     if resolution.status is not ResolutionStatus.RESOLVED or resolution.candidate is None or resolution.method is None:
         raise ValueError("only resolved tracks can be persisted")
     candidate = resolution.candidate
-    normalize_resolution_provider(candidate.provider)
+    normalized_provider = normalize_resolution_provider(candidate.provider)
     connection.execute(
         """
         INSERT INTO track_resolutions(
@@ -238,7 +238,7 @@ def save_resolution(connection: sqlite3.Connection, spotify_id: str, resolution:
         """,
         (
             spotify_id,
-            candidate.provider,
+            normalized_provider,
             candidate.provider_track_id,
             resolution.method.value,
             resolution.confidence,
