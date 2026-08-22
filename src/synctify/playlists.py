@@ -247,6 +247,14 @@ def _remove_owned_file(
     return path, None
 
 
+def _retain_failed_delete_ownership(
+    protected: Path | None,
+    ownership: GeneratedPlaylistOwnership,
+) -> bool:
+    """Keep managing a marked output when its deletion failed transiently."""
+    return protected is not None and _has_playlist_marker(protected, ownership.playlist_id)
+
+
 def _drop_ownership(connection: sqlite3.Connection, playlist_id: str) -> None:
     connection.execute(
         "DELETE FROM generated_playlists WHERE playlist_id = ?",
@@ -343,6 +351,8 @@ def build_playlists(
             removed_outputs.append(removed)
         if protected is not None:
             protected_outputs.append(protected)
+        if _retain_failed_delete_ownership(protected, ownership):
+            continue
         _drop_ownership(connection, playlist_id)
         occupied.pop(_filename_key(ownership.filename), None)
         ownerships.pop(playlist_id, None)
@@ -372,9 +382,6 @@ def build_playlists(
                 old_ownership is not None
                 and _filename_key(old_ownership.filename) == _filename_key(desired)
             ):
-                # Keep the already-owned spelling for a case-only rename. On the
-                # default macOS filesystem both spellings are the same physical path,
-                # so writing the new spelling and deleting the old one is destructive.
                 desired = old_ownership.filename
             selected = _select_output_filename(
                 write_playlist,
@@ -407,9 +414,10 @@ def build_playlists(
                 removed_outputs.append(removed)
             if protected is not None:
                 protected_outputs.append(protected)
-            _drop_ownership(connection, playlist.spotify_id)
-            occupied.pop(_filename_key(old_ownership.filename), None)
-            ownerships.pop(playlist.spotify_id, None)
+            if not _retain_failed_delete_ownership(protected, old_ownership):
+                _drop_ownership(connection, playlist.spotify_id)
+                occupied.pop(_filename_key(old_ownership.filename), None)
+                ownerships.pop(playlist.spotify_id, None)
 
         results.append(
             PlaylistBuildResult(

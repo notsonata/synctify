@@ -29,12 +29,15 @@ def migrate_command(
     library: Path | None = typer.Option(
         None,
         "--library",
-        exists=True,
+        exists=False,
         file_okay=False,
         dir_okay=True,
-        readable=True,
-        resolve_path=True,
-        help="Optional existing FLAC tree to relink/copy after Spotify desired state is restored.",
+        readable=False,
+        resolve_path=False,
+        help=(
+            "Optional existing FLAC tree to relink/copy after Spotify desired state is restored. "
+            "A disconnected source is accepted only when --resume skips an already-completed relink stage."
+        ),
     ),
     apply: bool = typer.Option(
         False,

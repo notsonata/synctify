@@ -124,11 +124,20 @@ def _default_doctor(settings: Settings) -> DoctorReport:
     )
 
 
-def _validate_library_source(source: Path | None) -> Path | None:
+def _validate_library_source(
+    source: Path | None,
+    *,
+    allow_missing: bool = False,
+) -> Path | None:
     if source is None:
         return None
-    resolved = source.expanduser().resolve()
+    try:
+        resolved = source.expanduser().resolve()
+    except OSError as exc:
+        raise MigrationError(f"could not resolve library source: {exc}") from exc
     if not resolved.exists():
+        if allow_missing:
+            return resolved
         raise MigrationError(f"library source does not exist: {resolved}")
     if not resolved.is_dir():
         raise MigrationError(f"library source is not a directory: {resolved}")
@@ -144,15 +153,23 @@ def _preflight(settings: Settings, options: MigrationOptions) -> _MigrationPrefl
     try:
         bundle = read_portable_bundle(options.portable_file)
         import_plan = plan_import(settings, bundle)
-        source = _validate_library_source(options.library_source)
+        path = checkpoint_path(settings.home)
+        existing = load_checkpoint(path)
+        allow_missing_source = (
+            options.resume
+            and existing is not None
+            and existing.is_completed(STAGE_LIBRARY_RELINK)
+        )
+        source = _validate_library_source(
+            options.library_source,
+            allow_missing=allow_missing_source,
+        )
         identity = migration_identity(
             options.portable_file,
             library_source=source,
             relink_limit=options.relink_limit,
             allow_partial=options.allow_partial,
         )
-        path = checkpoint_path(settings.home)
-        existing = load_checkpoint(path)
     except (OSError, ValueError, MigrationCheckpointError) as exc:
         raise MigrationError(str(exc)) from exc
 
@@ -210,7 +227,10 @@ def _prepare_apply_checkpoint(
         return existing
     if options.restart:
         checkpoint = new_checkpoint(identity)
-        save_checkpoint(preflight.checkpoint_file, checkpoint)
+        try:
+            save_checkpoint(preflight.checkpoint_file, checkpoint)
+        except MigrationCheckpointError as exc:
+            raise MigrationError(str(exc)) from exc
         return checkpoint
     if existing is not None:
         if existing.fingerprint != identity.fingerprint:
