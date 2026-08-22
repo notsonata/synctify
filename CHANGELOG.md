@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.0 - 2026-08-23
+
+Synctify 1.1.0 turns the Textual interface from a read-mostly status frontend into an operational control surface for the existing CLI workflows.
+
+### TUI command center
+
+- add first-class `Import Spotify` and `Full Update` actions to the dashboard
+- add `i` and `u` keyboard shortcuts for Spotify import and the coordinated update workflow
+- add a fifth `Commands` tab with quick actions for import, full update, automatic resolution, playlist builds, and target listing
+- add a command entry box for running existing non-interactive Synctify CLI commands such as acquisition, sync, backup, and configuration commands without leaving the TUI
+- execute commands in a background Textual worker and stream merged stdout/stderr into an in-app command log
+- run commands through the installed `synctify.app` command surface rather than duplicating workflow logic in the TUI
+- suppress nested automatic update checks for commands launched by the TUI and reject recursive `tui` launches
+- refresh dashboard and unresolved-track state after a command completes
+
+### Regression coverage
+
+- cover command execution, output streaming, `SYNCTIFY_HOME` propagation, automatic-update suppression, and nested-TUI rejection
+- extend headless Textual coverage to the new Commands tab and command input
+
+Commands that require terminal input remain CLI-only for now; the command runner uses a closed stdin so interactive prompts cannot block the TUI worker.
+
+No SQLite schema migration is required for this release.
+
 ## 1.0.5 - 2026-08-22
 
 Synctify 1.0.5 adds release-aware self-updating on top of the stable macOS installation layout introduced in 1.0.4.
