@@ -25,12 +25,31 @@ def _command_tree(group: Any) -> dict[str, object]:
     return tree
 
 
-def test_explicit_app_preserves_legacy_command_surface_plus_new_top_level_commands() -> None:
+def test_explicit_app_preserves_legacy_surface_except_intentional_public_commands() -> None:
     explicit = _command_tree(typer.main.get_command(app))
     legacy = _command_tree(typer.main.get_command(legacy_app))
 
     assert explicit.pop("tui") is None
     assert explicit.pop("upgrade") is None
+    # Spotify selection intentionally replaces legacy all-at-once `pull`.
+    explicit_spotify = explicit["spotify"]
+    legacy_spotify = legacy["spotify"]
+    assert isinstance(explicit_spotify, dict)
+    assert isinstance(legacy_spotify, dict)
+    assert explicit_spotify == {
+        "fetch-playlists": None,
+        "login": None,
+        "logout": None,
+        "update-tracked": None,
+    }
+    legacy["spotify"] = {
+        name: value for name, value in legacy_spotify.items() if name != "pull"
+    }
+    explicit["spotify"] = {
+        name: value
+        for name, value in explicit_spotify.items()
+        if name not in {"fetch-playlists", "update-tracked"}
+    }
     assert explicit == legacy
 
 
@@ -65,7 +84,7 @@ def test_explicit_app_has_expected_top_level_and_nested_commands() -> None:
     }
 
     expected_nested = {
-        "spotify": {"login", "logout", "pull"},
+        "spotify": {"login", "logout", "fetch-playlists", "update-tracked"},
         "resolve": {"auto", "clear", "set", "status"},
         "qobuz": {"doctor", "download-url"},
         "streamrip": {"doctor"},
@@ -82,9 +101,11 @@ def test_all_help_paths_render_from_explicit_app() -> None:
     assert runner.invoke(app, ["--help"]).exit_code == 0
     assert runner.invoke(app, ["tui", "--help"]).exit_code == 0
     assert runner.invoke(app, ["upgrade", "--help"]).exit_code == 0
-    removed = runner.invoke(app, ["self-update", "--help"])
+    assert runner.invoke(app, ["spotify", "fetch-playlists", "--help"]).exit_code == 0
+    assert runner.invoke(app, ["spotify", "update-tracked", "--help"]).exit_code == 0
+    removed = runner.invoke(app, ["spotify", "pull", "--help"])
     assert removed.exit_code != 0
-    assert "No such command 'self-update'" in removed.output
+    assert "No such command 'pull'" in removed.output
     for group in ("spotify", "resolve", "qobuz", "streamrip", "playlists", "targets", "config"):
         result = runner.invoke(app, [group, "--help"])
         assert result.exit_code == 0, result.output
