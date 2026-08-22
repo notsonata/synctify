@@ -1,0 +1,81 @@
+name: auto tag release
+
+on:
+  workflow_run:
+    workflows: ["tests"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: auto-tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag-release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tested main commit
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Check out current main for manual run
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Determine release tag
+        id: release
+        shell: bash
+        run: |
+          VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Project version must use stable X.Y.Z form: $VERSION"
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+          python scripts/verify_release.py "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "create=false" >> "$GITHUB_OUTPUT"
+            echo "$TAG already exists; nothing to release."
+          else
+            echo "create=true" >> "$GITHUB_OUTPUT"
+            echo "$TAG does not exist; it will be created from $(git rev-parse HEAD)."
+          fi
+
+      - name: Create and push release tag
+        if: steps.release.outputs.create == 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG" "$(git rev-parse HEAD)"
+          git push origin "refs/tags/$TAG"
+
+      - name: Dispatch release workflow
+        if: steps.release.outputs.create == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh workflow run release.yml --ref main --field tag="$TAG"
