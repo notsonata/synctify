@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import sqlite3
 from typing import Callable, TypeVar
 
 import typer
 
 from . import cli_entry as cli_entry_module
+from .acquisition import pending_acquisitions
 from .cli import (
     _qobuz_config,
     acquire as base_acquire,
@@ -31,6 +33,7 @@ from .providers.streamrip import StreamripConfig, StreamripProvider
 from .providers.streamrip_search import StreamripCatalogSearch, StreamripSearchConfig
 from .spotify.auth import SpotifyAuthError
 from .spotify.client import SpotifyAPIError
+from .update_preview import preview_database_connection
 from .user_config import (
     UserConfig,
     UserConfigError,
@@ -74,6 +77,81 @@ def _resolve_config_value(factory: Callable[[], T]) -> T:
     except UserConfigError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
+
+
+@app.command("status")
+def configured_status() -> None:
+    """Show local library state without migrating an older database."""
+    settings = Settings.default()
+    if not settings.database_path.exists():
+        typer.echo("Synctify is not initialized. Run: synctify init")
+        raise typer.Exit(code=1)
+    if not settings.database_path.is_file():
+        typer.echo(f"Database error: not a file: {settings.database_path}", err=True)
+        raise typer.Exit(code=2)
+
+    connection: sqlite3.Connection | None = None
+    try:
+        uri = f"{settings.database_path.resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True)
+        connection.row_factory = sqlite3.Row
+        tables = {
+            str(row["name"])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        missing = {"tracks", "playlists", "playlist_tracks"} - tables
+        if missing:
+            raise sqlite3.DatabaseError(
+                f"missing required table(s): {', '.join(sorted(missing))}"
+            )
+
+        tracks = connection.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+        local_tracks = connection.execute(
+            "SELECT COUNT(*) FROM tracks WHERE local_path IS NOT NULL AND local_path != ''"
+        ).fetchone()[0]
+        unresolved = connection.execute(
+            "SELECT COUNT(*) FROM tracks WHERE status = 'unresolved'"
+        ).fetchone()[0]
+        playlists = connection.execute("SELECT COUNT(*) FROM playlists").fetchone()[0]
+        if "track_resolutions" in tables:
+            resolutions = connection.execute(
+                "SELECT COUNT(*) FROM track_resolutions"
+            ).fetchone()[0]
+            pending = len(pending_acquisitions(connection))
+        else:
+            resolutions = 0
+            pending = 0
+        targets = (
+            connection.execute("SELECT COUNT(*) FROM sync_targets").fetchone()[0]
+            if "sync_targets" in tables
+            else 0
+        )
+        last_pull = (
+            connection.execute(
+                "SELECT value FROM metadata WHERE key = 'spotify_last_pull_at'"
+            ).fetchone()
+            if "metadata" in tables
+            else None
+        )
+    except (OSError, sqlite3.DatabaseError) as exc:
+        typer.echo(f"Database error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    finally:
+        if connection is not None:
+            connection.close()
+
+    typer.echo("Synctify")
+    typer.echo(f"  Tracks:      {tracks}")
+    typer.echo(f"  Local FLACs: {local_tracks}")
+    typer.echo(f"  Unresolved:  {unresolved}")
+    typer.echo(f"  Resolutions: {resolutions}")
+    typer.echo(f"  Pending DL:  {pending}")
+    typer.echo(f"  Playlists:   {playlists}")
+    typer.echo(f"  Targets:     {targets}")
+    typer.echo(f"  Spotify:     {last_pull[0] if last_pull else 'never pulled'}")
+    typer.echo(f"  Library:     {settings.library_dir}")
 
 
 @config_app.command("show")
@@ -267,8 +345,9 @@ def configured_update(
         sources=",".join(configured_sources),
     )
 
-    settings.ensure_directories()
-    initialize(settings.database_path)
+    if not dry_run:
+        settings.ensure_directories()
+        initialize(settings.database_path)
     try:
         snapshot = cli_entry_module._fetch_update_snapshot(settings)
     except (SpotifyAuthError, SpotifyAPIError) as exc:
@@ -283,8 +362,8 @@ def configured_update(
     )
 
     try:
-        with connect(settings.database_path) as connection:
-            if dry_run:
+        if dry_run:
+            with preview_database_connection(settings.database_path) as connection:
                 report = preview_update_workflow(
                     connection,
                     snapshot,
@@ -294,7 +373,8 @@ def configured_update(
                     search_results=search_results,
                     resolution_limit=resolution_limit,
                 )
-            else:
+        else:
+            with connect(settings.database_path) as connection:
                 report = run_update_workflow(
                     connection,
                     snapshot,
