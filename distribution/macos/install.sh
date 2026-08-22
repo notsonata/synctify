@@ -58,10 +58,13 @@ cat > "$COMMAND_PATH" <<'EOF'
 set -euo pipefail
 APP_ROOT="${SYNCTIFY_APP_ROOT:-$HOME/Library/Application Support/Synctify/app}"
 LAUNCHER="$APP_ROOT/current/synctify.sh"
+BIN_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 if [[ ! -x "$LAUNCHER" ]]; then
   printf 'synctify: installed launcher not found at %s\n' "$LAUNCHER" >&2
   exit 1
 fi
+export SYNCTIFY_INSTALLED=1
+export SYNCTIFY_BIN_DIR="$BIN_DIR"
 exec "$LAUNCHER" "$@"
 EOF
 chmod +x "$COMMAND_PATH"
