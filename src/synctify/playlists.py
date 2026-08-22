@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import unicodedata
 
 from .models import Playlist, Track
 
@@ -52,6 +53,11 @@ class GeneratedPlaylistOwnership:
 def safe_playlist_filename(name: str) -> str:
     cleaned = re.sub(r"[/:]", "_", name).strip()
     return cleaned or "Untitled Playlist"
+
+
+def _filename_key(filename: str) -> str:
+    """Return the portable case-insensitive identity of a playlist filename."""
+    return unicodedata.normalize("NFC", filename).casefold()
 
 
 def playlist_marker(spotify_id: str) -> str:
@@ -150,16 +156,18 @@ def playlists_from_database(connection: sqlite3.Connection) -> tuple[Playlist, .
 
 
 def _output_filenames(playlists: tuple[Playlist, ...]) -> dict[str, str]:
-    by_name: dict[str, list[Playlist]] = {}
+    by_name: dict[str, list[tuple[str, Playlist]]] = {}
     for playlist in playlists:
-        by_name.setdefault(safe_playlist_filename(playlist.name), []).append(playlist)
+        safe_name = safe_playlist_filename(playlist.name)
+        by_name.setdefault(_filename_key(safe_name), []).append((safe_name, playlist))
 
     filenames: dict[str, str] = {}
-    for safe_name, matches in by_name.items():
+    for matches in by_name.values():
         if len(matches) == 1:
-            filenames[matches[0].spotify_id] = f"{safe_name}.m3u8"
+            safe_name, playlist = matches[0]
+            filenames[playlist.spotify_id] = f"{safe_name}.m3u8"
             continue
-        for playlist in matches:
+        for safe_name, playlist in matches:
             suffix = re.sub(r"[^A-Za-z0-9]", "", playlist.spotify_id)[-8:] or "playlist"
             filenames[playlist.spotify_id] = f"{safe_name} [{suffix}].m3u8"
     return filenames
@@ -190,6 +198,16 @@ def _safe_owned_path(playlist_dir: Path, filename: str) -> Path | None:
     if resolved.parent != root:
         return None
     return resolved
+
+
+def _casefold_paths(playlist_dir: Path, filename: str) -> tuple[Path, ...]:
+    """Find directory entries that would collide on a case-insensitive filesystem."""
+    key = _filename_key(filename)
+    try:
+        entries = tuple(playlist_dir.expanduser().iterdir())
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return ()
+    return tuple(path for path in entries if _filename_key(path.name) == key)
 
 
 def _has_playlist_marker(path: Path, spotify_id: str) -> bool:
@@ -256,13 +274,18 @@ def _fallback_filename(playlist: Playlist, desired: str, occupied: dict[str, str
     while True:
         extra = "" if index == 1 else f"-{index}"
         candidate = f"{stem} [synctify-{suffix}{extra}].m3u8"
-        owner = occupied.get(candidate)
+        owner = occupied.get(_filename_key(candidate))
         path = _safe_owned_path(playlist_dir, candidate)
         if owner not in {None, playlist.spotify_id} or path is None:
             index += 1
             continue
-        if not path.exists() or _has_playlist_marker(path, playlist.spotify_id):
+        casefold_matches = _casefold_paths(playlist_dir, candidate)
+        if not casefold_matches:
             return candidate
+        if len(casefold_matches) == 1 and _has_playlist_marker(
+            casefold_matches[0], playlist.spotify_id
+        ):
+            return casefold_matches[0].name
         index += 1
 
 
@@ -272,10 +295,20 @@ def _select_output_filename(
     occupied: dict[str, str],
     playlist_dir: Path,
 ) -> str:
-    owner = occupied.get(desired)
+    owner = occupied.get(_filename_key(desired))
     path = _safe_owned_path(playlist_dir, desired)
     if owner not in {None, playlist.spotify_id} or path is None:
         return _fallback_filename(playlist, desired, occupied, playlist_dir)
+
+    casefold_matches = _casefold_paths(playlist_dir, desired)
+    if len(casefold_matches) > 1:
+        return _fallback_filename(playlist, desired, occupied, playlist_dir)
+    if len(casefold_matches) == 1 and casefold_matches[0].name != desired:
+        existing = casefold_matches[0]
+        if _has_playlist_marker(existing, playlist.spotify_id):
+            return existing.name
+        return _fallback_filename(playlist, desired, occupied, playlist_dir)
+
     if not path.exists():
         return desired
     if _has_playlist_marker(path, playlist.spotify_id):
@@ -294,7 +327,9 @@ def build_playlists(
     playlists = playlists_from_database(connection)
     filenames = _output_filenames(playlists)
     ownerships = _ownerships(connection)
-    occupied = {item.filename: item.playlist_id for item in ownerships.values()}
+    occupied = {
+        _filename_key(item.filename): item.playlist_id for item in ownerships.values()
+    }
     current_ids = {playlist.spotify_id for playlist in playlists}
     removed_outputs: list[Path] = []
     protected_outputs: list[Path] = []
@@ -309,7 +344,7 @@ def build_playlists(
         if protected is not None:
             protected_outputs.append(protected)
         _drop_ownership(connection, playlist_id)
-        occupied.pop(ownership.filename, None)
+        occupied.pop(_filename_key(ownership.filename), None)
         ownerships.pop(playlist_id, None)
 
     for playlist in playlists:
@@ -333,6 +368,14 @@ def build_playlists(
                 snapshot_id=playlist.snapshot_id,
             )
             desired = filenames[playlist.spotify_id]
+            if (
+                old_ownership is not None
+                and _filename_key(old_ownership.filename) == _filename_key(desired)
+            ):
+                # Keep the already-owned spelling for a case-only rename. On the
+                # default macOS filesystem both spellings are the same physical path,
+                # so writing the new spelling and deleting the old one is destructive.
+                desired = old_ownership.filename
             selected = _select_output_filename(
                 write_playlist,
                 desired,
@@ -352,8 +395,8 @@ def build_playlists(
                     removed_outputs.append(removed)
                 if protected is not None:
                     protected_outputs.append(protected)
-                occupied.pop(old_ownership.filename, None)
-            occupied[selected] = playlist.spotify_id
+                occupied.pop(_filename_key(old_ownership.filename), None)
+            occupied[_filename_key(selected)] = playlist.spotify_id
             ownerships[playlist.spotify_id] = GeneratedPlaylistOwnership(
                 playlist.spotify_id,
                 selected,
@@ -365,7 +408,7 @@ def build_playlists(
             if protected is not None:
                 protected_outputs.append(protected)
             _drop_ownership(connection, playlist.spotify_id)
-            occupied.pop(old_ownership.filename, None)
+            occupied.pop(_filename_key(old_ownership.filename), None)
             ownerships.pop(playlist.spotify_id, None)
 
         results.append(
