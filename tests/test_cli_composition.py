@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
-import click
 import typer
 from typer.testing import CliRunner
 
@@ -11,30 +11,32 @@ from synctify.db import connect, initialize
 from synctify.migration_cli import app as legacy_app
 
 
-def _command_tree(group: click.Group) -> dict[str, object]:
+def _commands(group: Any) -> dict[str, Any]:
+    commands = getattr(group, "commands", None)
+    assert isinstance(commands, dict)
+    return commands
+
+
+def _command_tree(group: Any) -> dict[str, object]:
     tree: dict[str, object] = {}
-    for name, command in sorted(group.commands.items()):
-        if isinstance(command, click.Group):
-            tree[name] = _command_tree(command)
-        else:
-            tree[name] = None
+    for name, command in sorted(_commands(group).items()):
+        child_commands = getattr(command, "commands", None)
+        tree[name] = _command_tree(command) if isinstance(child_commands, dict) else None
     return tree
 
 
 def test_explicit_app_preserves_legacy_command_surface() -> None:
     explicit = typer.main.get_command(app)
     legacy = typer.main.get_command(legacy_app)
-    assert isinstance(explicit, click.Group)
-    assert isinstance(legacy, click.Group)
 
     assert _command_tree(explicit) == _command_tree(legacy)
 
 
 def test_explicit_app_has_expected_top_level_and_nested_commands() -> None:
     command = typer.main.get_command(app)
-    assert isinstance(command, click.Group)
+    commands = _commands(command)
 
-    assert set(command.commands) == {
+    assert set(commands) == {
         "acquire",
         "audit",
         "backup",
@@ -68,9 +70,7 @@ def test_explicit_app_has_expected_top_level_and_nested_commands() -> None:
         "config": {"set", "show", "unset"},
     }
     for group_name, names in expected_nested.items():
-        child = command.commands[group_name]
-        assert isinstance(child, click.Group)
-        assert set(child.commands) == names
+        assert set(_commands(commands[group_name])) == names
 
 
 def test_all_help_paths_render_from_explicit_app() -> None:
