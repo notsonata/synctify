@@ -60,7 +60,7 @@ Set SYNCTIFY_PYTHON to an explicit Python interpreter if you do not want the lau
 Your data
 ---------
 
-Synctify's database, configuration, and generated playlists are NOT stored in this release folder. They continue to live in Synctify's normal macOS application-data directory (or SYNCTIFY_HOME if you set it). The canonical music library uses that location by default, but can be pointed at another absolute directory during setup, with `config set library-dir`, or via SYNCTIFY_LIBRARY_DIR.
+Synctify's database, configuration, canonical music library, and playlists are NOT stored in this release folder. The database, configuration, and generated playlists continue to live in Synctify's normal macOS application-data directory (or SYNCTIFY_HOME if you set it). The canonical music library uses that location by default, but can be pointed at another absolute directory during setup, with `config set library-dir`, or via SYNCTIFY_LIBRARY_DIR.
 
 Deleting or replacing this extracted release folder therefore does not delete your Synctify state or music library. The .venv inside the release folder is disposable.
 
