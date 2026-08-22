@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -152,7 +152,19 @@ def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
 
 
-def _migrate(connection: sqlite3.Connection) -> None:
+def _previous_schema_version(connection: sqlite3.Connection) -> str | None:
+    metadata_exists = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'metadata'"
+    ).fetchone()
+    if metadata_exists is None:
+        return None
+    row = connection.execute(
+        "SELECT value FROM metadata WHERE key = 'schema_version'"
+    ).fetchone()
+    return None if row is None else str(row["value"])
+
+
+def _migrate(connection: sqlite3.Connection, previous_version: str | None) -> None:
     playlist_columns = _columns(connection, "playlists")
     if "source_kind" not in playlist_columns:
         connection.execute(
@@ -237,8 +249,9 @@ def _migrate(connection: sqlite3.Connection) -> None:
         """
     )
 
-    # Seed the catalog from older all-at-once Spotify imports so existing users can
-    # manage those playlists with the new selection flow without re-importing data.
+    # Preserve older all-at-once Spotify imports as reviewable catalog data. The
+    # v7 transition deliberately removes those playlists from active desired state
+    # so provider resolution/downloads cannot begin until the user confirms them.
     now = "1970-01-01T00:00:00+00:00"
     connection.execute(
         """
@@ -282,11 +295,33 @@ def _migrate(connection: sqlite3.Connection) -> None:
         """
     )
 
+    if previous_version != SCHEMA_VERSION:
+        # Every playlist that v6 considered tracked must be explicitly reviewed
+        # once under the staged workflow. Preserve exclusions, local_path, hashes,
+        # and provider mappings; only desired-state membership is detached.
+        connection.execute(
+            """
+            UPDATE spotify_playlist_items
+            SET state = 'pending_add'
+            WHERE state IN ('included', 'pending_remove')
+              AND playlist_id IN (
+                  SELECT spotify_id FROM spotify_playlist_catalog WHERE tracked = 1
+              )
+            """
+        )
+        connection.execute(
+            "UPDATE spotify_playlist_catalog SET tracked = 0 WHERE tracked = 1"
+        )
+        connection.execute(
+            "DELETE FROM playlists WHERE spotify_id IN (SELECT spotify_id FROM spotify_playlist_catalog)"
+        )
+
 
 def initialize(path: Path) -> None:
     with connect(path) as connection:
+        previous_version = _previous_schema_version(connection)
         connection.executescript(SCHEMA)
-        _migrate(connection)
+        _migrate(connection, previous_version)
         connection.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', ?)",
             (SCHEMA_VERSION,),
