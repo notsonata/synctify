@@ -74,6 +74,17 @@ def test_duration_breaks_an_otherwise_identical_metadata_tie() -> None:
     assert result.candidate == correct
 
 
+def test_gross_duration_mismatch_is_rejected() -> None:
+    track = source_track(isrc=None, album=None, duration_ms=180_000)
+    candidate = Candidate("qobuz", "wrong", track.title, track.artist, None, None, 300_000)
+
+    result = resolve_track(track, [candidate])
+
+    assert result.status is ResolutionStatus.UNRESOLVED
+    assert result.candidate is None
+    assert "duration mismatch" in result.reason
+
+
 def test_ambiguous_candidates_are_not_auto_resolved() -> None:
     track = source_track(isrc=None)
     candidates = [
@@ -134,6 +145,43 @@ def test_manual_resolution_persists_and_can_be_cleared(tmp_path: Path) -> None:
         assert stored["is_manual"] == 1
         assert clear_resolution(connection, "spotify-1") is True
         assert get_manual_override(connection, "spotify-1") is None
+
+
+def test_changed_manual_resolution_invalidates_acquired_artifact(tmp_path: Path) -> None:
+    database = tmp_path / "synctify.sqlite3"
+    initialize(database)
+    with connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO tracks(
+                spotify_id, title, artist, album, isrc, duration_ms,
+                qobuz_id, local_path, sha256, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local')
+            """,
+            (
+                "spotify-1",
+                "Song",
+                "Artist",
+                "Album",
+                "USABC1234567",
+                180_000,
+                "old-qobuz-id",
+                str(tmp_path / "old.flac"),
+                "old-hash",
+            ),
+        )
+        set_manual_override(connection, "spotify-1", "qobuz", "old-qobuz-id")
+        set_manual_override(connection, "spotify-1", "qobuz", "new-qobuz-id")
+
+        track = connection.execute(
+            "SELECT qobuz_id, local_path, sha256, status FROM tracks WHERE spotify_id = ?",
+            ("spotify-1",),
+        ).fetchone()
+
+    assert track["qobuz_id"] is None
+    assert track["local_path"] is None
+    assert track["sha256"] is None
+    assert track["status"] == "resolved"
 
 
 def test_v2_database_migrates_to_resolution_schema(tmp_path: Path) -> None:

@@ -57,8 +57,9 @@ def plan_snapshot(connection: sqlite3.Connection, snapshot: SpotifySnapshot) -> 
         )
         for playlist in snapshot.playlists
     }
+    inaccessible_ids = set(snapshot.inaccessible_playlists)
     added_ids = desired.keys() - current.keys()
-    removed_ids = current.keys() - desired.keys()
+    removed_ids = current.keys() - desired.keys() - inaccessible_ids
     common_ids = current.keys() & desired.keys()
     renamed: list[tuple[str, str]] = []
     reordered: list[str] = []
@@ -91,13 +92,14 @@ def apply_snapshot(connection: sqlite3.Connection, snapshot: SpotifySnapshot) ->
     """Apply Spotify desired state without committing the caller's transaction."""
     now = datetime.now(timezone.utc).isoformat()
     desired_ids = {playlist.spotify_id for playlist in snapshot.playlists}
+    preserved_ids = set(snapshot.inaccessible_playlists)
     existing_ids = {
         row["spotify_id"]
         for row in connection.execute(
             "SELECT spotify_id FROM playlists WHERE source_kind IN ('liked', 'playlist')"
         )
     }
-    for playlist_id in existing_ids - desired_ids:
+    for playlist_id in existing_ids - desired_ids - preserved_ids:
         connection.execute("DELETE FROM playlists WHERE spotify_id = ?", (playlist_id,))
 
     for playlist in snapshot.playlists:
@@ -182,5 +184,5 @@ def format_plan(plan: ChangePlan) -> str:
     if plan.skipped_items:
         lines.append(f"  Skipped non-track/local items: {plan.skipped_items}")
     if plan.inaccessible_playlists:
-        lines.append("  Inaccessible playlists: " + ", ".join(plan.inaccessible_playlists))
+        lines.append("  Inaccessible playlist IDs preserved: " + ", ".join(plan.inaccessible_playlists))
     return "\n".join(lines)

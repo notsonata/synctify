@@ -81,6 +81,14 @@ def _duration_score(left_ms: int | None, right_ms: int | None) -> float | None:
     return 0.0
 
 
+def _gross_duration_mismatch(track: Track, candidate: Candidate) -> bool:
+    return (
+        track.duration_ms is not None
+        and candidate.duration_ms is not None
+        and abs(track.duration_ms - candidate.duration_ms) > 20_000
+    )
+
+
 def metadata_score(track: Track, candidate: Candidate) -> float:
     weighted: list[tuple[float, float]] = [
         (0.45, _similarity(track.title, candidate.title)),
@@ -159,8 +167,20 @@ def resolve_track(
             "exact ISRC match",
         )
 
+    plausible = tuple(
+        candidate for candidate in candidates if not _gross_duration_mismatch(track, candidate)
+    )
+    if not plausible:
+        return Resolution(
+            ResolutionStatus.UNRESOLVED,
+            None,
+            MatchMethod.METADATA,
+            0.0,
+            "all metadata candidates have a duration mismatch greater than 20 seconds",
+        )
+
     ranked_scores = sorted(
-        ((metadata_score(track, candidate), candidate) for candidate in candidates),
+        ((metadata_score(track, candidate), candidate) for candidate in plausible),
         key=lambda item: item[0],
         reverse=True,
     )
@@ -243,11 +263,26 @@ def set_manual_override(
     ).fetchone()
     if row is None:
         raise KeyError(spotify_id)
+
+    normalized_provider = provider.strip().lower()
+    normalized_track_id = provider_track_id.strip()
+    if not normalized_provider or not normalized_track_id:
+        raise ValueError("provider and provider track ID cannot be empty")
+
+    previous = connection.execute(
+        "SELECT provider, provider_track_id FROM track_resolutions WHERE spotify_id = ?",
+        (spotify_id,),
+    ).fetchone()
+    changed = previous is not None and (
+        previous["provider"] != normalized_provider
+        or previous["provider_track_id"] != normalized_track_id
+    )
+
     resolution = Resolution(
         ResolutionStatus.RESOLVED,
         Candidate(
-            provider=provider,
-            provider_track_id=provider_track_id,
+            provider=normalized_provider,
+            provider_track_id=normalized_track_id,
             title=row["title"],
             artist=row["artist"],
             album=row["album"],
@@ -259,6 +294,19 @@ def set_manual_override(
         "manual override",
     )
     save_resolution(connection, spotify_id, resolution)
+
+    if changed:
+        connection.execute(
+            """
+            UPDATE tracks
+            SET qobuz_id = NULL,
+                local_path = NULL,
+                sha256 = NULL,
+                status = 'resolved'
+            WHERE spotify_id = ?
+            """,
+            (spotify_id,),
+        )
 
 
 def get_manual_override(connection: sqlite3.Connection, spotify_id: str) -> ManualOverride | None:

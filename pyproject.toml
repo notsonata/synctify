@@ -27,7 +27,3 @@ synctify = "synctify.migration_cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/synctify"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"

@@ -111,7 +111,7 @@ def fetch_spotify_snapshot(client: SpotifyClient) -> SpotifySnapshot:
             entries, skipped_here = _parse_entries(client.playlist_items(playlist_id), playlist_items=True)
         except SpotifyAPIError as exc:
             if exc.status_code == 403:
-                inaccessible.append(name)
+                inaccessible.append(playlist_id)
                 continue
             raise
         skipped += skipped_here
