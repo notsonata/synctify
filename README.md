@@ -1,6 +1,6 @@
 # Synctify
 
-**Current version: 1.0.0**
+**Current version: 1.0.1**
 
 Synctify is a local-first macOS music library manager. Spotify defines the desired playlist/library state; Synctify resolves those tracks against supported lossless source services, acquires one canonical local FLAC copy, builds M3U8 playlists, mirrors the library to devices, and can keep a non-destructive cloud backup.
 
@@ -37,6 +37,35 @@ Streamrip is required for automatic catalog resolution used by `synctify resolve
 
 ## Install
 
+### macOS release ZIP
+
+For normal use, download `synctify-1.0.1-macos.zip` from the GitHub Release and extract it. GitHub's automatically generated **Source code (zip)** and **Source code (tar.gz)** entries are repository snapshots; they are not the end-user launcher bundle.
+
+From Terminal, enter the extracted folder and run:
+
+```bash
+./synctify.sh
+```
+
+With no arguments, the launcher opens the Textual TUI. It can also run any normal CLI command:
+
+```bash
+./synctify.sh setup
+./synctify.sh doctor
+./synctify.sh update --dry-run
+./synctify.sh update
+```
+
+The first launch finds Python 3.12+, creates a private `.venv` inside the extracted release folder, and installs the bundled Synctify wheel. Internet access is required during that first bootstrap so pip can install the wheel's Python dependencies. Set `SYNCTIFY_PYTHON` if you want the launcher to use a specific compatible interpreter.
+
+Synctify's database, configuration, canonical library, and playlists remain in the normal macOS application-data location, not inside the release folder. The bundle and its private `.venv` are disposable. Set `SYNCTIFY_HOME` to override the default application-data directory.
+
+The GitHub Release also includes `SHA256SUMS`, the Python wheel, and the source distribution. Streamrip, qobuz-dl, and rclone remain external tools and are not included in the ZIP.
+
+### Development checkout
+
+From a cloned source checkout:
+
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
@@ -44,14 +73,18 @@ python -m pip install -e '.[dev]'
 synctify setup
 ```
 
-Set `SYNCTIFY_HOME` to override the default application-data directory.
-
 ## Interactive TUI
 
 Launch the terminal user interface with:
 
 ```bash
 synctify tui
+```
+
+When using the release ZIP, the equivalent command is simply:
+
+```bash
+./synctify.sh
 ```
 
 The 1.0 TUI is an interactive frontend over Synctify's existing local state and service functions. It includes:
@@ -370,4 +403,4 @@ python -m compileall -q src tests
 python -m pytest
 ```
 
-GitHub Actions runs the test suite on macOS across supported Python versions and smoke-tests the built wheel in an isolated virtual environment.
+GitHub Actions runs the test suite on macOS across supported Python versions, smoke-tests the built wheel, builds the macOS launcher ZIP, and executes the launcher from the extracted bundle before a release can be tagged.

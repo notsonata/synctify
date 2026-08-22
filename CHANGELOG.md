@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.1 - 2026-08-22
+
+Synctify 1.0.1 adds the first end-user macOS distribution layer on top of the verified Python package release.
+
+### macOS distribution
+
+- add `synctify-1.0.1-macos.zip` as a first-class GitHub Release asset
+- include an executable `synctify.sh` launcher, the matching Synctify wheel, `VERSION`, and concise setup instructions
+- make `./synctify.sh` create and reuse a private `.venv` inside the extracted release folder
+- launch the Textual TUI when the launcher is run without arguments, while forwarding supplied arguments to the normal CLI
+- auto-detect Python 3.12+ or honor `SYNCTIFY_PYTHON` for an explicit interpreter
+- keep Synctify state, configuration, and the canonical library outside the disposable release folder
+- build and execute the ZIP launcher in CI on Python 3.12, 3.13, and 3.14
+- smoke-test the same ZIP again in the tag-triggered release workflow before publishing it
+- include the ZIP in `SHA256SUMS` alongside the wheel and source distribution
+
+The launcher still relies on internet access during its first bootstrap to install Python dependencies from the bundled wheel metadata. Streamrip, qobuz-dl, and rclone remain external tools and are not vendored in the ZIP.
+
 ## 1.0.0 - 2026-08-22
 
 Synctify 1.0.0 is the first stable release of the canonical lossless-library workflow, incorporating the correctness, migration, performance, source-policy, CLI architecture, and interactive TUI work completed during the pre-1.0 development series.

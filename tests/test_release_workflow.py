@@ -21,26 +21,25 @@ def _release_module():
 def test_current_stable_release_metadata_is_self_consistent() -> None:
     release = _release_module()
 
-    version, notes = release.verify_release(ROOT, "v1.0.0")
+    version, notes = release.verify_release(ROOT, "v1.0.1")
 
-    assert version == "1.0.0"
-    assert "first stable release" in notes
-    assert "### Safety and correctness" in notes
-    assert "### Interactive TUI" in notes
+    assert version == "1.0.1"
+    assert "macOS distribution" in notes
+    assert "synctify.sh" in notes
 
 
 def test_mismatched_release_tag_is_rejected() -> None:
     release = _release_module()
 
     with pytest.raises(release.ReleaseValidationError, match="does not match pyproject"):
-        release.verify_release(ROOT, "v1.0.1")
+        release.verify_release(ROOT, "v1.0.2")
 
 
 def test_non_stable_release_tag_is_rejected() -> None:
     release = _release_module()
 
     with pytest.raises(release.ReleaseValidationError, match="stable vX.Y.Z"):
-        release.verify_release(ROOT, "1.0.0")
+        release.verify_release(ROOT, "1.0.1")
 
 
 def test_release_workflow_builds_and_publishes_verified_artifacts() -> None:
@@ -54,6 +53,10 @@ def test_release_workflow_builds_and_publishes_verified_artifacts() -> None:
     assert "python -m twine check dist/*" in workflow
     assert ".venv-release/bin/synctify --help" in workflow
     assert ".venv-release/bin/synctify tui --help" in workflow
+    assert "python scripts/build_distribution.py --dist-dir dist" in workflow
+    assert 'BUNDLE="synctify-${VERSION}-macos"' in workflow
+    assert '"dist/${BUNDLE}.zip"' in workflow
+    assert '".dist-release/${BUNDLE}/synctify.sh" --help' in workflow
     assert "shasum -a 256 * > SHA256SUMS" in workflow
     assert 'gh release create "$GITHUB_REF_NAME" dist/*' in workflow
     assert "--notes-file release-notes.md" in workflow
