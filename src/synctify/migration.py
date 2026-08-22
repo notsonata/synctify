@@ -10,7 +10,7 @@ from .db import connect, initialize
 from .doctor import DoctorReport, run_doctor
 from .playlists import PlaylistBuildReport, build_playlists
 from .portable import ImportPlan, PortableBundle, apply_import, plan_import, read_portable_bundle
-from .relink import LibraryRelinkReport, relink_library
+from .relink import RelinkReport, relink_library
 from .spotify.auth import (
     KeyringTokenStore,
     SpotifyAuth,
@@ -50,7 +50,7 @@ class MigrationOptions:
 class MigrationReport:
     import_plan: ImportPlan
     spotify_plan: ChangePlan | None = None
-    relink: LibraryRelinkReport | None = None
+    relink: RelinkReport | None = None
     playlists: PlaylistBuildReport | None = None
     audit: LibraryAuditReport | None = None
     doctor: DoctorReport | None = None
@@ -144,7 +144,7 @@ def run_migration(
     except Exception as exc:
         raise MigrationError(f"could not apply Spotify desired state: {exc}") from exc
 
-    relink_report: LibraryRelinkReport | None = None
+    relink_report: RelinkReport | None = None
     if source is not None:
         try:
             with connect(settings.database_path) as connection:
@@ -239,10 +239,11 @@ def format_migration_report(report: MigrationReport) -> str:
             [
                 "",
                 "Library relink",
-                f"  Matched: {report.relink.matched}",
-                f"  Applied: {report.relink.applied_count}",
-                f"  Unresolved: {report.relink.unresolved}",
-                f"  Ambiguous: {report.relink.ambiguous}",
+                f"  Safe matches: {len(report.relink.matches)}",
+                f"  Copied: {report.relink.copied}",
+                f"  Adopted: {report.relink.adopted}",
+                f"  Reused: {report.relink.reused}",
+                f"  Unmatched: {len(report.relink.unmatched)}",
                 f"  Failures: {len(report.relink.failures)}",
             ]
         )
