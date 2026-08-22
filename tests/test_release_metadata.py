@@ -14,7 +14,7 @@ def test_release_version_is_consistent() -> None:
     version = pyproject["project"]["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert version == "0.23.0"
+    assert version == "1.0.0"
     assert synctify.__version__ == version
     assert f"**Current version: {version}**" in readme
 
