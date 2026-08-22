@@ -21,25 +21,25 @@ def _release_module():
 def test_current_stable_release_metadata_is_self_consistent() -> None:
     release = _release_module()
 
-    version, notes = release.verify_release(ROOT, "v1.2.1")
+    version, notes = release.verify_release(ROOT, "v1.2.2")
 
-    assert version == "1.2.1"
-    assert "Tidal authentication safety" in notes
-    assert "per-track automatic-resolution progress" in notes
+    assert version == "1.2.2"
+    assert "Review-before-download migration" in notes
+    assert "Local FLAC reuse" in notes
 
 
 def test_mismatched_release_tag_is_rejected() -> None:
     release = _release_module()
 
     with pytest.raises(release.ReleaseValidationError, match="does not match pyproject"):
-        release.verify_release(ROOT, "v1.2.2")
+        release.verify_release(ROOT, "v1.2.3")
 
 
 def test_non_stable_release_tag_is_rejected() -> None:
     release = _release_module()
 
     with pytest.raises(release.ReleaseValidationError, match="stable vX.Y.Z"):
-        release.verify_release(ROOT, "1.2.1")
+        release.verify_release(ROOT, "1.2.2")
 
 
 def test_auto_tag_workflow_releases_successful_main_version_once() -> None:
